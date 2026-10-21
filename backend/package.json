@@ -1,0 +1,23 @@
+{
+  "name": "sun-saloon",
+  "version": "1.0.0",
+  "description": "a prototype of hair saloon slot appointment booking",
+  "keywords": [
+    "sun-saloon"
+  ],
+  "homepage": "https://github.com/SunStytlePlatform/sunsaloon#readme",
+  "bugs": {
+    "url": "https://github.com/SunStytlePlatform/sunsaloon/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SunStytlePlatform/sunsaloon.git"
+  },
+  "license": "ISC",
+  "author": "Jainethin",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "test": "test"
+  }
+}
