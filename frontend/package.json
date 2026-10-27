@@ -4,9 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --env-file=../.env scripts/run-next.js dev",
-    "build": "node --env-file=../.env scripts/run-next.js build",
-    "start": "node --env-file=../.env scripts/run-next.js start"
+    "dev": "node --env-file-if-exists=../.env scripts/run-next.js dev",
+    "build": "node --env-file-if-exists=../.env scripts/run-next.js build"
   },
   "dependencies": {
     "next": "^15.5.0",

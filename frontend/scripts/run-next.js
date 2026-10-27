@@ -7,7 +7,7 @@ const nextBin = require.resolve('next/dist/bin/next');
 
 const [command = 'dev', ...rest] = process.argv.slice(2);
 const args = [nextBin, command, ...rest];
-if (command === 'dev' || command === 'start') {
+if (command === 'dev') {
   args.push('-p', process.env.FRONTEND_PORT || '3000');
 }
 

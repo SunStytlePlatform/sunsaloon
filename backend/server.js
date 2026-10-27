@@ -1,7 +1,10 @@
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 
-const PORT = Number(process.env.BACKEND_PORT) || 5000;
+// Render injects PORT; fall back to BACKEND_PORT from .env locally.
+const PORT = Number(process.env.PORT || process.env.BACKEND_PORT) || 5000;
+const FRONTEND_DIR = path.resolve(import.meta.dirname, '../frontend/out');
 const CUSTOM_MESSAGE = process.env.CUSTOM_MESSAGE ?? '(CUSTOM_MESSAGE not set - .env not loaded)';
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? '')
   .split(',')
@@ -26,6 +29,9 @@ app.get('/suns/health', (req, res) => {
     customMessage: CUSTOM_MESSAGE,
   });
 });
+
+// Serve the statically exported Next.js frontend (built by `npm run build` at the repo root).
+app.use(express.static(FRONTEND_DIR));
 
 app.listen(PORT, () => {
   console.log(`Backend listening on http://localhost:${PORT}`);
