@@ -81,6 +81,9 @@ test('status update requires a known status', () => {
   assert.deepEqual(validateStatusUpdateInput({ status: 'confirmed' }).value, { status: 'confirmed' });
   assert.equal(validateStatusUpdateInput({}).errors[0].message, 'status is required');
   assert.equal(validateStatusUpdateInput({ status: 'accepted' }).errors.length, 1);
+  assert.equal(validateStatusUpdateInput({ status: 'completed' }).errors.length, 1);
+  assert.equal(validateStatusUpdateInput({ status: 'cancelled' }).errors.length, 1);
+  assert.deepEqual(validateStatusUpdateInput({ status: 'rejected' }).value, { status: 'rejected' });
 });
 
 test('id param must be a UUID', () => {

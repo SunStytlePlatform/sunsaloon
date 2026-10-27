@@ -1,5 +1,5 @@
 import { isValidDateString, isValidTimeString, toHHMM } from './dateTime.js';
-import { APPOINTMENT_STATUSES } from './appointmentStatus.js';
+import { APPOINTMENT_STATUSES, PATCHABLE_STATUSES } from './appointmentStatus.js';
 
 // Pure validators: each returns { value, errors[, status] } so they can be unit-tested without Express.
 
@@ -133,6 +133,12 @@ export function validateStatusUpdateInput(body) {
   const status = typeof body.status === 'string' ? body.status.trim().toLowerCase() : null;
   if (!APPOINTMENT_STATUSES.includes(status)) {
     return { value: null, errors: [{ field: 'status', message: `status must be one of: ${APPOINTMENT_STATUSES.join(', ')}` }] };
+  }
+  if (!PATCHABLE_STATUSES.includes(status)) {
+    return {
+      value: null,
+      errors: [{ field: 'status', message: `status '${status}' cannot be set yet; allowed: ${PATCHABLE_STATUSES.join(', ')}` }],
+    };
   }
   return { value: { status }, errors: [] };
 }

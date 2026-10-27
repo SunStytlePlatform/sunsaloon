@@ -9,10 +9,14 @@ export const APPOINTMENT_STATUS = Object.freeze({
 // Mirrors the appointments_status_check constraint in the database.
 export const APPOINTMENT_STATUSES = Object.freeze(Object.values(APPOINTMENT_STATUS));
 
-// Phase 1: the admin can only accept or reject pending requests.
+// Lifecycle: pending -> confirmed -> completed | cancelled, and pending -> rejected.
 const ALLOWED_TRANSITIONS = Object.freeze({
   [APPOINTMENT_STATUS.PENDING]: [APPOINTMENT_STATUS.CONFIRMED, APPOINTMENT_STATUS.REJECTED],
+  [APPOINTMENT_STATUS.CONFIRMED]: [APPOINTMENT_STATUS.COMPLETED, APPOINTMENT_STATUS.CANCELLED],
 });
+
+// Statuses the PATCH endpoint currently accepts; completed/cancelled are not enabled yet.
+export const PATCHABLE_STATUSES = Object.freeze([APPOINTMENT_STATUS.CONFIRMED, APPOINTMENT_STATUS.REJECTED]);
 
 export function allowedNextStatuses(from) {
   return Object.hasOwn(ALLOWED_TRANSITIONS, from) ? ALLOWED_TRANSITIONS[from] : [];

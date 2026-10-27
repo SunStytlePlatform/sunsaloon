@@ -31,11 +31,15 @@ test('getNowInTimeZone converts to the given zone', () => {
   assert.deepEqual(getNowInTimeZone('UTC', instant), { date: '2026-11-15', time: '20:00' });
 });
 
-test('only pending -> confirmed/rejected transitions are allowed', () => {
+test('status hierarchy: pending -> confirmed -> completed/cancelled, pending -> rejected', () => {
   assert.equal(canTransition('pending', 'confirmed'), true);
   assert.equal(canTransition('pending', 'rejected'), true);
+  assert.equal(canTransition('confirmed', 'completed'), true);
+  assert.equal(canTransition('confirmed', 'cancelled'), true);
   assert.equal(canTransition('pending', 'completed'), false);
+  assert.equal(canTransition('pending', 'cancelled'), false);
   assert.equal(canTransition('confirmed', 'rejected'), false);
   assert.equal(canTransition('rejected', 'confirmed'), false);
+  assert.equal(canTransition('completed', 'cancelled'), false);
   assert.deepEqual(allowedNextStatuses('constructor'), []);
 });
