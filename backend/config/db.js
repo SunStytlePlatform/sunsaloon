@@ -1,19 +1,25 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from './env.js';
+import { logger } from '../utils/logger.js';
 
 let supabase = null;
 
 export async function connectDB() {
   if (env.supabaseUrl && env.supabaseServiceRoleKey) {
+    logger.debug('Supabase: creating client');
     supabase = createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+  } else {
+    logger.warn('Supabase: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing - client not created');
   }
   return checkDBConnection();
 }
 
 // supabase-js connects lazily, so ping the Auth health endpoint to verify URL + key.
 export async function checkDBConnection() {
+  logger.debug('Supabase: checking connection');
+  const start = Date.now();
   let result;
   if (!supabase) {
     result = { connected: false, message: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set' };
@@ -22,16 +28,18 @@ export async function checkDBConnection() {
       const res = await fetch(`${env.supabaseUrl}/auth/v1/health`, {
         headers: { apikey: env.supabaseServiceRoleKey },
       });
+      logger.debug(`Supabase: health endpoint responded ${res.status} in ${Date.now() - start} ms`);
       result = res.ok
         ? { connected: true, message: 'Connected to Supabase successfully' }
         : { connected: false, message: `Supabase responded with status ${res.status}` };
     } catch (err) {
+      logger.debug('Supabase: connection error details', err);
       result = { connected: false, message: `Unable to reach Supabase: ${err.message}` };
     }
   }
 
-  if (result.connected) console.log(`Supabase: ${result.message}`);
-  else console.error(`Supabase: connection FAILED - ${result.message}`);
+  if (result.connected) logger.info(`Supabase: ${result.message}`);
+  else logger.error(`Supabase: connection FAILED - ${result.message}`);
   return result;
 }
 

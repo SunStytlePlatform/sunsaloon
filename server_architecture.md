@@ -6,6 +6,7 @@ backend/
 │   └── db.js                      # Supabase client + connection check
 ├── middleware/
 │   ├── cors.js                    # CORS allow list
+│   ├── requestLogger.js           # logs every API request (blue) and response (green/red)
 │   ├── notFound.js                # JSON 404 for unknown routes
 │   └── errorHandler.js            # catches errors, returns a JSON 500
 ├── routes/
@@ -16,4 +17,5 @@ backend/
 │   ├── health.controller.js       # builds the health response
 │   └── db.controller.js           # Supabase connection status
 └── utils/
-    └── dateTime.js                # current date/time helper
+    ├── dateTime.js                # current date/time helper
+    └── logger.js                  # LOG_LEVEL-aware colored console logger
