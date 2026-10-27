@@ -12,6 +12,7 @@ import {
 } from '../utils/validators.js';
 import {
   createAppointment,
+  getAppointment,
   listAppointments,
   updateAppointmentStatus,
 } from '../controllers/appointment.controller.js';
@@ -30,6 +31,7 @@ router.post('/', bookingRateLimiter, validateBody(validateCreateAppointmentInput
 
 // Admin.
 router.get('/', adminAuth, validateQuery(validateAppointmentFilters), listAppointments);
+router.get('/:id', adminAuth, validateParams(validateIdParams), getAppointment);
 router.patch(
   '/:id/status',
   adminAuth,

@@ -72,6 +72,19 @@ export async function listAppointments({ status, date } = {}) {
   return data.map(formatAppointment);
 }
 
+export async function getAppointmentById(id) {
+  logger.debug(`appointment.service: fetching appointment ${id}`);
+  const { data, error } = await getSupabase()
+    .from('appointments')
+    .select(DETAIL_COLUMNS)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw toApiError(error, 'fetching appointment');
+  if (!data) throw new ApiError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found');
+  return formatAppointment(data);
+}
+
 export async function updateAppointmentStatus(id, nextStatus) {
   const supabase = getSupabase();
 

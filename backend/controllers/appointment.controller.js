@@ -24,6 +24,17 @@ export async function listAppointments(req, res, next) {
   }
 }
 
+export async function getAppointment(req, res, next) {
+  try {
+    logger.debug(`[${req.id}] entered appointment.controller.getAppointment`);
+    const appointment = await appointmentService.getAppointmentById(req.validated.params.id);
+    sendSuccess(res, { message: 'Appointment retrieved successfully', data: appointment });
+  } catch (err) {
+    logger.debug(`[${req.id}] appointment.controller.getAppointment failed: ${err.message}`);
+    next(err);
+  }
+}
+
 export async function updateAppointmentStatus(req, res, next) {
   try {
     logger.debug(`[${req.id}] entered appointment.controller.updateAppointmentStatus`);
