@@ -16,7 +16,11 @@ logger.debug('Configuration loaded', {
   supabaseConfigured: Boolean(env.supabaseUrl && env.supabaseServiceRoleKey),
 });
 
-await connectDB();
+try {
+  await connectDB();
+} catch (err) {
+  logger.error('Unexpected error while connecting to the database - continuing without it', err);
+}
 
 const server = app.listen(env.port, () => {
   logger.info(`Backend listening on http://localhost:${env.port} (LOG_LEVEL=${logger.level})`);
@@ -25,6 +29,27 @@ const server = app.listen(env.port, () => {
 });
 
 server.on('error', (err) => {
-  logger.error(`Server failed to start on port ${env.port}: ${err.message}`, err);
+  const reason = err.code === 'EADDRINUSE' ? `port ${env.port} is already in use` : err.message;
+  logger.error(`Server failed to start: ${reason}`, err);
   process.exit(1);
 });
+
+// Render sends SIGTERM on redeploy; finish in-flight requests before exiting.
+function shutdown(signal) {
+  logger.info(`${signal} received - shutting down gracefully`);
+  server.close((err) => {
+    if (err) {
+      logger.error('Error while closing the server', err);
+      process.exit(1);
+    }
+    logger.info('Server closed');
+    process.exit(0);
+  });
+  setTimeout(() => {
+    logger.error('Shutdown timed out - forcing exit');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

@@ -4,6 +4,26 @@ import { useState } from 'react';
 
 // Empty = same origin (bundled deploy); set to http://localhost:5000 for `next dev`.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const REQUEST_TIMEOUT_MS = 10_000;
+
+// Normalises network failures, timeouts and non-JSON responses into readable errors.
+async function fetchJson(path) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  } catch (err) {
+    if (err.name === 'TimeoutError') throw new Error('Request timed out - the server did not respond');
+    throw new Error('Unable to reach the server - check that the backend is running');
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`Unexpected response from server (status ${res.status})`);
+  }
+  return { ok: res.ok, status: res.status, data };
+}
 
 export default function Home() {
   const [health, setHealth] = useState(null);
@@ -18,10 +38,11 @@ export default function Home() {
     setError('');
     setHealth(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/suns/health`);
-      if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-      setHealth(await res.json());
+      const { ok, status, data } = await fetchJson('/suns/health');
+      if (!ok) throw new Error(data?.error || `Request failed with status ${status}`);
+      setHealth(data);
     } catch (err) {
+      console.error('Health check failed:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -33,10 +54,14 @@ export default function Home() {
     setDbError('');
     setDb(null);
     try {
-      // 503 still carries a JSON status body, so don't treat it as a network error.
-      const res = await fetch(`${API_BASE_URL}/suns/db`);
-      setDb(await res.json());
+      const { ok, status, data } = await fetchJson('/suns/db');
+      // 503 still carries a DB status body; anything else without `connected` is a real error.
+      if (!ok && typeof data?.connected !== 'boolean') {
+        throw new Error(data?.error || `Request failed with status ${status}`);
+      }
+      setDb(data);
     } catch (err) {
+      console.error('DB check failed:', err);
       setDbError(err.message);
     } finally {
       setDbLoading(false);
