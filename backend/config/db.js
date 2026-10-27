@@ -1,9 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from './env.js';
 import { logger } from '../utils/logger.js';
+import { ApiError } from '../utils/ApiError.js';
 
 let supabase = null;
 const HEALTH_TIMEOUT_MS = 5000;
+const QUERY_TIMEOUT_MS = 10_000;
+
+// Stops a hung Supabase request from holding an API request open forever.
+function fetchWithTimeout(url, options = {}) {
+  return fetch(url, { ...options, signal: options.signal ?? AbortSignal.timeout(QUERY_TIMEOUT_MS) });
+}
 
 export async function connectDB() {
   if (env.supabaseUrl && env.supabaseServiceRoleKey) {
@@ -11,6 +18,7 @@ export async function connectDB() {
       logger.debug('Supabase: creating client');
       supabase = createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
         auth: { persistSession: false, autoRefreshToken: false },
+        global: { fetch: fetchWithTimeout },
       });
     } catch (err) {
       supabase = null;
@@ -58,6 +66,9 @@ export async function checkDBConnection() {
 }
 
 export function getSupabase() {
-  if (!supabase) throw new Error('Supabase client not initialised - check SUPABASE_* env vars');
+  if (!supabase) {
+    logger.error('Supabase client requested but not initialised - check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
+    throw new ApiError(503, 'DATABASE_NOT_CONFIGURED', 'The database is not configured');
+  }
   return supabase;
 }

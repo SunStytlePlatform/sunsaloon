@@ -10,11 +10,21 @@ process.on('uncaughtException', (err) => {
 });
 
 logger.debug('Configuration loaded', {
+  appEnv: env.appEnv,
   logLevel: logger.level,
   port: env.port,
   corsAllowedOrigins: env.corsAllowedOrigins,
   supabaseConfigured: Boolean(env.supabaseUrl && env.supabaseServiceRoleKey),
+  salonTimeZone: env.salonTimeZone,
+  bookingRateLimit: env.bookingRateLimit,
+  trustProxy: env.trustProxy,
 });
+
+if (env.isProduction) {
+  logger.info('APP_ENV=production - admin endpoints are DISABLED until admin authentication is implemented');
+} else {
+  logger.warn('APP_ENV=development - admin endpoints are UNPROTECTED; do not expose this server publicly');
+}
 
 try {
   await connectDB();
