@@ -15,9 +15,6 @@ const ALLOWED_TRANSITIONS = Object.freeze({
   [APPOINTMENT_STATUS.CONFIRMED]: [APPOINTMENT_STATUS.COMPLETED, APPOINTMENT_STATUS.CANCELLED],
 });
 
-// Statuses the PATCH endpoint currently accepts; completed/cancelled are not enabled yet.
-export const PATCHABLE_STATUSES = Object.freeze([APPOINTMENT_STATUS.CONFIRMED, APPOINTMENT_STATUS.REJECTED]);
-
 export function allowedNextStatuses(from) {
   return Object.hasOwn(ALLOWED_TRANSITIONS, from) ? ALLOWED_TRANSITIONS[from] : [];
 }
