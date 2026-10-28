@@ -21,9 +21,11 @@ function normalizeShop(raw: Raw): Shop {
   };
 }
 
+// GET /api/shops currently returns one shop object (single-salon backend); a list is also accepted for multi-shop.
 export async function getShops(): Promise<Shop[]> {
-  const data = await apiRequest<Raw[] | null>('/api/shops', { cache: { revalidate: REVALIDATE_SECONDS } });
-  return (data ?? []).map(normalizeShop);
+  const data = await apiRequest<Raw | Raw[] | null>('/api/shops', { cache: { revalidate: REVALIDATE_SECONDS } });
+  if (!data) return [];
+  return (Array.isArray(data) ? data : [data]).map(normalizeShop);
 }
 
 export async function getShopById(id: string): Promise<Shop> {
