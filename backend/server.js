@@ -1,4 +1,5 @@
-import app from './app.js';
+import app, { setFrontendHandler } from './app.js';
+import { createFrontendHandler } from './utils/frontend.js';
 import { env } from './config/env.js';
 import { connectDB } from './config/db.js';
 import { logger } from './utils/logger.js';
@@ -32,11 +33,16 @@ try {
   logger.error('Unexpected error while connecting to the database - continuing without it', err);
 }
 
+const frontend = await createFrontendHandler();
+if (frontend) setFrontendHandler(frontend.handler);
+
 const server = app.listen(env.port, () => {
-  logger.info(`Backend listening on http://localhost:${env.port} (LOG_LEVEL=${logger.level})`);
+  logger.info(`Server listening on http://localhost:${env.port} (LOG_LEVEL=${logger.level})`);
   logger.info(`CORS allow list: ${env.corsAllowedOrigins.join(', ') || '(none)'}`);
   logger.info(`Custom message: ${env.customMessage}`);
 });
+
+if (frontend?.upgrade) server.on('upgrade', frontend.upgrade);
 
 server.on('error', (err) => {
   const reason = err.code === 'EADDRINUSE' ? `port ${env.port} is already in use` : err.message;

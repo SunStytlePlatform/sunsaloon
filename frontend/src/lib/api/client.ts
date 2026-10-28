@@ -20,25 +20,23 @@ export class ApiRequestError extends Error {
 const REQUEST_TIMEOUT_MS = 10_000;
 
 function baseUrl(): string {
-  const url = process.env.API_BASE_URL || `http://localhost:${process.env.BACKEND_PORT || 5000}`;
+  // Same process as Express in production, so loopback on the port Express listens on.
+  const port = process.env.PORT || process.env.BACKEND_PORT || 5000;
+  const url = process.env.API_BASE_URL || `http://127.0.0.1:${port}`;
   return url.replace(/\/+$/, '');
 }
 
 export type CacheMode = 'no-store' | { revalidate: number };
 
 interface RequestOptions {
-  method?: 'GET' | 'POST';
-  body?: unknown;
   cache?: CacheMode;
 }
 
-export async function apiRequest<T = unknown>(path: string, { method = 'GET', body, cache = 'no-store' }: RequestOptions = {}): Promise<T> {
+export async function apiRequest<T = unknown>(path: string, { cache = 'no-store' }: RequestOptions = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${baseUrl()}${path}`, {
-      method,
-      headers: { Accept: 'application/json', ...(body !== undefined && { 'Content-Type': 'application/json' }) },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       ...(cache === 'no-store' ? { cache: 'no-store' as const } : { next: { revalidate: cache.revalidate } }),
     });

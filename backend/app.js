@@ -1,4 +1,3 @@
-import path from 'node:path';
 import express from 'express';
 import { env } from './config/env.js';
 import { corsMiddleware } from './middleware/cors.js';
@@ -8,9 +7,13 @@ import { errorHandler } from './middleware/errorHandler.js';
 import routes from './routes/index.js';
 import apiRoutes from './routes/api.routes.js';
 
-const FRONTEND_DIR = path.resolve(import.meta.dirname, '../frontend/out');
-
 const app = express();
+
+// Set by server.js once Next.js is prepared; until then (or if the frontend is unavailable) only the API is served.
+let frontendHandler = null;
+export function setFrontendHandler(handler) {
+  frontendHandler = handler;
+}
 
 app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxy);
@@ -21,8 +24,12 @@ app.use(express.json({ limit: '10kb' }));
 app.use('/suns', requestLogger, routes);
 app.use('/api', requestLogger, apiRoutes);
 
-// Serve the statically exported Next.js frontend (built by `npm run build` at the repo root).
-app.use(express.static(FRONTEND_DIR));
+// Everything that is not the API is rendered by the Next.js frontend running in this same process.
+app.use((req, res, next) => {
+  const isApiPath = /^\/(api|suns)(\/|$)/.test(req.path);
+  if (frontendHandler && !isApiPath) return frontendHandler(req, res);
+  next();
+});
 
 app.use(notFound);
 app.use(errorHandler);

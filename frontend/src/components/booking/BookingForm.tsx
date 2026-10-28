@@ -8,13 +8,13 @@ import { Input, Label, Textarea } from '@/components/ui/input';
 import { useBooking, type BookingError } from '@/hooks/useBooking';
 import { SubmissionStatus } from './SubmissionStatus';
 import {
-  createAppointmentSchema,
+  appointmentSchema,
   localDateTimeParts,
   type AppointmentFormInput,
   type AppointmentFormValues,
 } from '@/lib/validations/appointment.schema';
 
-const schema = createAppointmentSchema({ checkPast: true });
+const schema = appointmentSchema;
 const FIELDS = ['customer_name', 'customer_phone', 'customer_email', 'appointment_date', 'appointment_time', 'notes'] as const;
 
 export function BookingForm({ serviceId, onSuccess }: { serviceId: string; onSuccess: () => void }) {
