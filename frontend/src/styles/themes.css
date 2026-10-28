@@ -1,0 +1,42 @@
+/*
+ * Theme palettes. Each theme is just a block of CSS variables scoped to [data-theme="<name>"].
+ * To add a theme (e.g. a per-shop brand), copy a block below, rename the selector and change the values,
+ * then register the name in src/lib/theme.ts. No component changes are needed.
+ * The tokens are mapped to Tailwind utilities (bg-background, text-primary, ...) in globals.css.
+ * A shop-specific theme can be applied by wrapping that shop's pages in an element with data-theme="<name>".
+ */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --background: #faf8f5;
+  --foreground: #1f1b16;
+  --card: #ffffff;
+  --card-foreground: #1f1b16;
+  --muted: #f0ebe3;
+  --muted-foreground: #6b6258;
+  --border: #e6dfd4;
+  --primary: #9a6f08;
+  --primary-foreground: #ffffff;
+  --ring: #9a6f08;
+  --destructive: #c62828;
+  --success: #2e7d32;
+  --overlay: rgb(31 27 22 / 0.5);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #14110e;
+  --foreground: #f5efe6;
+  --card: #1e1a15;
+  --card-foreground: #f5efe6;
+  --muted: #2a251e;
+  --muted-foreground: #b3a898;
+  --border: #3a3329;
+  --primary: #e0aa3e;
+  --primary-foreground: #14110e;
+  --ring: #e0aa3e;
+  --destructive: #ef6b6b;
+  --success: #6bcf7f;
+  --overlay: rgb(0 0 0 / 0.65);
+}
