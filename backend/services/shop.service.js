@@ -23,3 +23,16 @@ export async function getCurrentShop() {
 
   return data[0];
 }
+
+export async function getShopById(id) {
+  logger.debug(`shop.service: fetching shop ${id}`);
+  const { data, error } = await getSupabase()
+    .from('shop_settings')
+    .select(PUBLIC_COLUMNS)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw toApiError(error, 'fetching shop by id');
+  if (!data) throw new ApiError(404, 'SHOP_NOT_FOUND', 'Salon not found');
+  return data;
+}

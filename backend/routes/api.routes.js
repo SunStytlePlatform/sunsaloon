@@ -11,7 +11,7 @@ router.use((req, res, next) => {
   next();
 });
 
-router.use('/shop', shopRoutes);
+router.use('/shops', shopRoutes);
 router.use('/services', serviceRoutes);
 router.use('/appointments', appointmentRoutes);
 
