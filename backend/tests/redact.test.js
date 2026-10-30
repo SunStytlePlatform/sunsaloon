@@ -13,6 +13,14 @@ test('leaves dates, times, ids and durations alone', () => {
   assert.equal(redactText(text), text);
 });
 
+test('long attacker-controlled strings are redacted in linear time', () => {
+  for (const text of ['a'.repeat(20_000), 'a@'.repeat(10_000), `${'a.'.repeat(10_000)}@`, `x@${'.'.repeat(20_000)}`, '1'.repeat(20_000)]) {
+    const started = performance.now();
+    redactText(text);
+    assert.ok(performance.now() - started < 250, `slow on ${text.slice(0, 8)}...`);
+  }
+});
+
 test('masks nested metadata and errors without mutating the original', () => {
   const meta = { details: 'phone 9000000001', list: ['a@b.co'], n: 5 };
   const clean = redactValue(meta);

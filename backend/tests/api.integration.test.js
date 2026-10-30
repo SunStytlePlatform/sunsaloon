@@ -191,9 +191,11 @@ test('names that are empty after cleaning or a single character are rejected', a
 test('a filled honeypot field is dropped silently without storing anything', async () => {
   const res = await call('/api/appointments', { method: 'POST', body: { ...booking(), website: 'http://spam.example' } });
   assert.equal(res.status, 201);
-  assert.equal(res.json.data, null);
-  assert.equal(fake.tables().appointments.length, 0);
-  assert.equal(fake.tables().customers.length, 0);
+  // Same shape as a real booking, so a bot cannot tell it was caught.
+  assert.deepEqual(Object.keys(res.json.data).sort(), Object.keys((await book({ customer_phone: '9000000099' })).json.data).sort());
+  assert.equal(res.json.data.status, 'pending');
+  assert.equal(fake.tables().appointments.length, 1, 'only the real booking above was stored');
+  assert.equal(fake.tables().customers.length, 1, 'the bot created no customer of its own');
 });
 
 test('a retried booking with the same Idempotency-Key replays the first response', async () => {
@@ -252,4 +254,45 @@ test('booking rules are public', async () => {
   const res = await call('/api/booking-rules');
   assert.equal(res.status, 200);
   assert.deepEqual(Object.keys(res.json.data).sort(), ['closingTime', 'maxAdvanceDays', 'openingTime', 'slotIntervalMinutes', 'timeZone']);
+});
+
+test('API responses are never cacheable', async () => {
+  assert.equal((await call('/api/shops')).headers.get('cache-control'), 'no-store');
+  assert.equal((await call('/api/appointments', { headers: admin })).headers.get('cache-control'), 'no-store');
+  assert.equal((await call('/suns/health')).headers.get('cache-control'), 'no-store');
+});
+
+test('bot traffic cannot use up the idempotency store and lock real visitors out', async () => {
+  // Honeypot hits with unique keys are answered without being remembered.
+  for (let i = 0; i < 60; i++) {
+    const res = await call('/api/appointments', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': `bot-key-${String(i).padStart(6, '0')}` },
+      body: { ...booking(), website: 'spam' },
+    });
+    assert.equal(res.status, 201);
+  }
+  // One client sending many distinct valid keys exceeds its own quota, but is never refused.
+  const day = (n) => futureDate(10 + n);
+  const statuses = [];
+  for (let i = 0; i < 30; i++) {
+    const res = await book(
+      { customer_phone: `92000000${String(i).padStart(2, '0')}`, appointment_date: day(Math.floor(i / 20)), appointment_time: `${String(9 + (i % 20) / 2 | 0).padStart(2, '0')}:${i % 2 ? '30' : '00'}` },
+      { 'Idempotency-Key': `visitor-key-${String(i).padStart(6, '0')}` },
+    );
+    statuses.push(res.status);
+  }
+  assert.ok(statuses.every((s) => s === 201), `statuses: ${statuses.join(' ')}`);
+});
+
+// Keep last: it locks this client's IP out of the admin endpoints.
+test('repeated wrong admin keys are throttled, even for the correct key afterwards', async () => {
+  const statuses = [];
+  for (let i = 0; i < 12; i++) {
+    statuses.push((await call('/api/appointments', { headers: { Authorization: `Bearer guess-${i}-aaaaaaaaaaaaaaaaaaaaaaaa` } })).status);
+  }
+  assert.ok(statuses.includes(429), `statuses: ${statuses.join(' ')}`);
+  const locked = await call('/api/appointments', { headers: admin });
+  assert.equal(locked.status, 429);
+  assert.equal(locked.json.error.code, 'RATE_LIMITED');
 });

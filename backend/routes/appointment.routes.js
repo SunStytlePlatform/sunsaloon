@@ -34,8 +34,8 @@ router.use((req, res, next) => {
 // quota is only spent on well-formed requests so a customer fixing a typo is not locked out.
 router.post(
   '/',
-  idempotency,
   honeypot,
+  idempotency,
   validateBody(validateCreateAppointmentInput),
   bookingRateLimiter,
   createAppointment,

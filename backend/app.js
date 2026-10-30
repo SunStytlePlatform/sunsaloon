@@ -24,6 +24,8 @@ app.set('trust proxy', env.trustProxy);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(['/api', '/suns'], (req, res, next) => {
   res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  // Responses can hold customer details (admin list) or live availability: never let browsers or proxies keep them.
+  res.set('Cache-Control', 'no-store');
   next();
 });
 
