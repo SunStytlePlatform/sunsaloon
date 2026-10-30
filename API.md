@@ -13,23 +13,38 @@ Base URL: `http://localhost:5000` locally, or your Render URL. All bodies are JS
 |---|---|
 | 200 / 201 | OK / appointment created |
 | 400 | Body is not a JSON object, or invalid JSON (`INVALID_REQUEST`, `INVALID_JSON`) |
-| 403 | Admin endpoint called while `APP_ENV=production` (`ADMIN_ACCESS_DISABLED`) |
+| 401 | Admin endpoint called without a valid bearer token (`UNAUTHORIZED`) |
+| 403 | Admin endpoint called while `ADMIN_API_KEY` is not configured (`ADMIN_ACCESS_DISABLED`) |
 | 404 | `SHOP_NOT_FOUND`, `SERVICE_NOT_FOUND`, `APPOINTMENT_NOT_FOUND`, `ROUTE_NOT_FOUND` |
-| 409 | `INVALID_STATUS_TRANSITION`, `STATUS_CONFLICT`, `DUPLICATE_RECORD` |
-| 422 | `VALIDATION_ERROR` (see `error.details`), `APPOINTMENT_IN_PAST`, `CONSTRAINT_VIOLATION` |
-| 429 | `RATE_LIMITED` (booking endpoint) |
+| 409 | `INVALID_STATUS_TRANSITION`, `STATUS_CONFLICT`, `DUPLICATE_RECORD`, `SLOT_TAKEN` |
+| 400 | also `INVALID_IDEMPOTENCY_KEY` |
+| 422 | `VALIDATION_ERROR` (see `error.details`), `APPOINTMENT_IN_PAST`, `OUTSIDE_OPENING_HOURS`, `INVALID_SLOT`, `TOO_FAR_AHEAD` (these three include `error.details[{field,message}]`), `IDEMPOTENCY_KEY_REUSED`, `CONSTRAINT_VIOLATION` |
+| 429 | `RATE_LIMITED` (per IP, booking endpoint), `TOO_MANY_ACTIVE_BOOKINGS` (per phone number) |
 | 500 / 503 | `INTERNAL_ERROR`, `DATABASE_ERROR` / `DATABASE_UNAVAILABLE`, `DATABASE_NOT_CONFIGURED` |
 
 ## Admin access
 
-There is no admin login yet. Admin endpoints are controlled by `APP_ENV`:
+Admin endpoints require `Authorization: Bearer <ADMIN_API_KEY>` in every environment:
 
-- `development` → open (bypassed) - for local work only.
-- `production` (default) → always `403 ADMIN_ACCESS_DISABLED`.
+- `ADMIN_API_KEY` not set (or shorter than 24 characters) → always `403 ADMIN_ACCESS_DISABLED`.
+- Header missing or wrong → `401 UNAUTHORIZED`.
+
+## Diagnostics
+
+`GET /suns/health` and `GET /suns/db` are public and limited to 60 requests/minute per IP. Without the admin key they return only `{ status, timestamp }` and `{ connected }`; with the key they also return `customMessage` and the Supabase check `message`. The DB check result is cached for 10 seconds.
 
 ---
 
-## GET /api/shop  (public)
+## GET /api/booking-rules  (public)
+
+What the server accepts for `appointment_date` / `appointment_time` (all in `timeZone`, the salon's):
+
+```json
+{ "success": true, "message": "Booking rules retrieved successfully",
+  "data": { "timeZone": "Asia/Kolkata", "openingTime": "09:00", "closingTime": "21:00", "slotIntervalMinutes": 30, "maxAdvanceDays": 90 } }
+```
+
+## GET /api/shops  (public)
 
 Table: `shop_settings`
 
@@ -82,10 +97,16 @@ Request:
 ```
 
 - Required: `customer_name`, `customer_phone`, `service_id`, `appointment_date` (YYYY-MM-DD), `appointment_time` (HH:MM, 24h).
-- Optional: `customer_email`, `notes`.
+- Optional: `customer_email`, `notes`. (The API accepts bookings without an email; the website's form deliberately requires one.)
 - `customer_phone`: spaces, dashes, dots and brackets are stripped. The result must be 7-15 digits, with an optional leading `+`.
-- Past date/time (in `SALON_TIMEZONE`) → `422 APPOINTMENT_IN_PAST`.
-- An existing customer with the same phone is reused (name/email are not overwritten).
+- Past date/time (in `SALON_TIMEZONE`) → `422 APPOINTMENT_IN_PAST`. The time must also be inside opening hours, on the slot grid, and not further ahead than `maxAdvanceDays` (see `GET /api/booking-rules`).
+- `customer_name` must be at least 2 characters after control characters are removed.
+- A phone number can hold at most `MAX_ACTIVE_BOOKINGS_PER_PHONE` (default 3) upcoming pending/confirmed appointments → `429 TOO_MANY_ACTIVE_BOOKINGS`.
+- Optional header `Idempotency-Key: <8-64 chars [A-Za-z0-9_-]>`. Resending the same key with the same body returns the first successful response (header `Idempotent-Replay: true`) instead of booking again; the same key with a different body → `422 IDEMPOTENCY_KEY_REUSED`. Keys are remembered for 10 minutes.
+- The web form includes a hidden `website` field (honeypot). A request with it filled in gets a normal-looking `201` with `data: null` and nothing is stored. Never send it from a real client.
+- The per-IP rate limit only counts well-formed requests, so fixing a typo does not use up the quota.
+- An existing customer with the same phone is reused, but the name/email typed on this booking are stored on the appointment itself (`contact_*` columns) and shown to admins.
+- A date + time already held by a `pending` or `confirmed` appointment → `409 SLOT_TAKEN`. Rejected, cancelled and completed appointments free the slot.
 - `status` is always `pending`; any `status`, `shop_id`, `customer_id` sent by the client is ignored.
 
 Response `201`:
@@ -96,7 +117,6 @@ Response `201`:
   "message": "Appointment request submitted successfully",
   "data": {
     "id": "9d1e…",
-    "customer_id": "c41a…",
     "service_id": "3f2b…",
     "appointment_date": "2026-11-15",
     "appointment_time": "10:30",

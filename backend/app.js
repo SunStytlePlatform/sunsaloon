@@ -1,4 +1,5 @@
 import express from 'express';
+import helmet from 'helmet';
 import { env } from './config/env.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { requestLogger } from './middleware/requestLogger.js';
@@ -17,6 +18,14 @@ export function setFrontendHandler(handler) {
 
 app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxy);
+
+// nosniff, frame protection, HSTS, referrer policy, ... for everything. The page CSP is set by Next.js
+// (frontend/next.config.ts) because it must allow the framework's inline scripts; API responses get a locked-down one.
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(['/api', '/suns'], (req, res, next) => {
+  res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
 
 app.use(corsMiddleware);
 app.use(express.json({ limit: '10kb' }));

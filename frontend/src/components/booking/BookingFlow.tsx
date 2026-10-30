@@ -8,14 +8,22 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { ServiceList } from '@/components/services/ServiceList';
 import { useServices } from '@/hooks/useServices';
+import type { BookingRules } from '@/types/bookingRules';
 import type { Service } from '@/types/service';
 import { BookingModal } from './BookingModal';
 
 // Services are fetched on the server for the first render; TanStack Query takes over for retries.
-export function BookingFlow({ services: initial, servicesFailed }: { services?: Service[]; servicesFailed?: boolean }) {
+interface Props {
+  services?: Service[];
+  servicesFailed?: boolean;
+  rules?: BookingRules | null;
+}
+
+export function BookingFlow({ services: initial, servicesFailed, rules }: Props) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Service | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
   const { data: services, isPending, isFetching, isError, error, refetch } = useServices(servicesFailed ? undefined : initial, open);
 
   function close() {
@@ -66,7 +74,10 @@ export function BookingFlow({ services: initial, servicesFailed }: { services?: 
 
       <BookingModal
         service={selected}
+        rules={rules}
         submitted={submitted}
+        busy={busy}
+        onBusyChange={setBusy}
         onSuccess={() => {
           setSubmitted(true);
           toast.success('Appointment request submitted');

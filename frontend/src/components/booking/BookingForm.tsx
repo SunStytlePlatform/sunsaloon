@@ -1,24 +1,34 @@
 'use client';
 
+import { useEffect, useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Textarea } from '@/components/ui/input';
-import { useBooking, type BookingError } from '@/hooks/useBooking';
+import { newIdempotencyKey, useBooking, type BookingError } from '@/hooks/useBooking';
 import { SubmissionStatus } from './SubmissionStatus';
 import {
-  appointmentSchema,
-  localDateTimeParts,
+  addDays,
+  createAppointmentSchema,
+  salonDateTimeParts,
   type AppointmentFormInput,
   type AppointmentFormValues,
 } from '@/lib/validations/appointment.schema';
+import type { BookingRules } from '@/types/bookingRules';
 
-const schema = appointmentSchema;
 const FIELDS = ['customer_name', 'customer_phone', 'customer_email', 'appointment_date', 'appointment_time', 'notes'] as const;
 
-export function BookingForm({ serviceId, onSuccess }: { serviceId: string; onSuccess: () => void }) {
+interface Props {
+  serviceId: string;
+  rules?: BookingRules | null;
+  onSuccess: () => void;
+  onBusyChange?: (busy: boolean) => void;
+}
+
+export function BookingForm({ serviceId, rules, onSuccess, onBusyChange }: Props) {
   const { mutateAsync, isPending: submitting, error: apiError, reset } = useBooking();
+  const schema = useMemo(() => createAppointmentSchema(rules), [rules]);
   const {
     register,
     handleSubmit,
@@ -34,13 +44,25 @@ export function BookingForm({ serviceId, onSuccess }: { serviceId: string; onSuc
       appointment_date: '',
       appointment_time: '',
       notes: '',
+      website: '',
     },
   });
 
+  // The dialog must not be closable mid-request, otherwise the customer never sees the outcome and may resubmit.
+  useEffect(() => {
+    onBusyChange?.(submitting);
+    return () => onBusyChange?.(false);
+  }, [submitting, onBusyChange]);
+
+  // Same key for retries of the same details; a new key as soon as the customer changes anything.
+  const attempt = useRef({ key: newIdempotencyKey(), signature: '' });
+
   const onSubmit = handleSubmit(async (values) => {
     reset();
+    const signature = JSON.stringify(values);
+    if (signature !== attempt.current.signature) attempt.current = { key: newIdempotencyKey(), signature };
     try {
-      await mutateAsync({ ...values, service_id: serviceId });
+      await mutateAsync({ values: { ...values, service_id: serviceId }, idempotencyKey: attempt.current.key });
       onSuccess();
     } catch (err) {
       // Values stay in the form on failure so the customer can correct and retry.
@@ -50,14 +72,25 @@ export function BookingForm({ serviceId, onSuccess }: { serviceId: string; onSuc
     }
   });
 
-  const today = localDateTimeParts(new Date()).date;
+  const today = salonDateTimeParts(new Date(), rules?.timeZone).date;
 
   const fields: { name: (typeof FIELDS)[number]; label: string; props: React.InputHTMLAttributes<HTMLInputElement> }[] = [
     { name: 'customer_name', label: 'Full name', props: { type: 'text', autoComplete: 'name' } },
     { name: 'customer_phone', label: 'Phone number', props: { type: 'tel', autoComplete: 'tel', inputMode: 'tel' } },
     { name: 'customer_email', label: 'Email address', props: { type: 'email', autoComplete: 'email' } },
-    { name: 'appointment_date', label: 'Preferred date', props: { type: 'date', min: today } },
-    { name: 'appointment_time', label: 'Preferred time', props: { type: 'time' } },
+    {
+      name: 'appointment_date',
+      label: 'Preferred date',
+      props: { type: 'date', min: today, ...(rules ? { max: addDays(today, rules.maxAdvanceDays) } : {}) },
+    },
+    {
+      name: 'appointment_time',
+      label: rules ? `Preferred time (${rules.openingTime}-${rules.closingTime})` : 'Preferred time',
+      props: {
+        type: 'time',
+        ...(rules ? { min: rules.openingTime, max: rules.closingTime, step: rules.slotIntervalMinutes * 60 } : {}),
+      },
+    },
   ];
 
   return (
@@ -84,6 +117,12 @@ export function BookingForm({ serviceId, onSuccess }: { serviceId: string; onSuc
         <Label htmlFor="notes">Notes (optional)</Label>
         <Textarea id="notes" aria-invalid={!!errors.notes} {...register('notes')} />
         {errors.notes && <p className="text-xs text-destructive">{errors.notes.message}</p>}
+      </div>
+
+      {/* Honeypot: off-screen and skipped by keyboard and screen readers; only bots fill it in. */}
+      <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+        <label htmlFor="website">Leave this field empty</label>
+        <input id="website" type="text" tabIndex={-1} autoComplete="off" {...register('website')} />
       </div>
 
       <SubmissionStatus pending={submitting} />

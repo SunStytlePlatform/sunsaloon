@@ -10,11 +10,13 @@ frontend/                              # Next.js (App Router, TypeScript, Tailwi
     ├── app/                           # routes (Server Components unless noted)
     │   ├── layout.tsx                 # html shell: theme init script, Header/Footer, QueryProvider, Toaster
     │   ├── globals.css                # Tailwind import + maps theme variables to utilities (bg-primary, ...)
-    │   ├── page.tsx                   # "/" landing: hero + shop cards (server fetch GET /api/shops)
-    │   ├── loading.tsx                # shop grid skeleton
+    │   ├── (home)/                    # route group: keeps this loading skeleton from wrapping /shops/* (which needs real 404s)
+    │   │   ├── page.tsx               # "/" landing: hero + shop cards (server fetch GET /api/shops)
+    │   │   └── loading.tsx            # shop grid skeleton
     │   ├── error.tsx                  # (client) "Unable to load shops" + Try again
     │   ├── not-found.tsx              # unknown pages
     │   └── shops/[id]/
+    │       ├── layout.tsx             # resolves the shop above loading.tsx so unknown ids return HTTP 404
     │       ├── page.tsx               # shop profile + BookingFlow (server fetch shop + services, generateMetadata)
     │       ├── loadShop.ts            # cached shop fetch shared by page + metadata; 404/400 -> notFound()
     │       ├── loading.tsx            # shop details skeleton

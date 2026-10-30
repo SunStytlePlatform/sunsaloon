@@ -3,6 +3,8 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { adminAuth } from '../middleware/adminAuth.js';
 import { createRateLimiter } from '../middleware/rateLimiter.js';
+import { createIdempotency } from '../middleware/idempotency.js';
+import { honeypot } from '../middleware/honeypot.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
 import {
   validateAppointmentFilters,
@@ -20,6 +22,7 @@ import {
 const router = Router();
 
 const bookingRateLimiter = createRateLimiter({ name: 'booking', ...env.bookingRateLimit });
+const idempotency = createIdempotency();
 
 router.use((req, res, next) => {
   logger.debug(`[${req.id}] entered routes/appointment.routes.js`);
@@ -27,7 +30,16 @@ router.use((req, res, next) => {
 });
 
 // Public: guest booking.
-router.post('/', bookingRateLimiter, validateBody(validateCreateAppointmentInput), createAppointment);
+// Order matters: replays and bot traps are answered before they use up the caller's rate-limit quota, and the
+// quota is only spent on well-formed requests so a customer fixing a typo is not locked out.
+router.post(
+  '/',
+  idempotency,
+  honeypot,
+  validateBody(validateCreateAppointmentInput),
+  bookingRateLimiter,
+  createAppointment,
+);
 
 // Admin.
 router.get('/', adminAuth, validateQuery(validateAppointmentFilters), listAppointments);

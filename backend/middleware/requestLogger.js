@@ -6,10 +6,9 @@ export function requestLogger(req, res, next) {
   req.id = randomUUID().slice(0, 8);
 
   logger.ingress(`--> [${req.id}] ${req.method} ${req.originalUrl}`);
+  // No IP address or user agent here: debug logs must stay safe to share when troubleshooting.
   logger.debug(`[${req.id}] request details`, {
-    ip: req.ip,
     origin: req.get('origin') ?? null,
-    userAgent: req.get('user-agent') ?? null,
     query: req.query,
   });
 
