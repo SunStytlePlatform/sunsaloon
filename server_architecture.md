@@ -8,7 +8,7 @@ backend/
 ├── middleware/
 │   ├── cors.js                    # CORS allow list
 │   ├── requestLogger.js           # logs every API request (blue) and response (green/red)
-│   ├── adminAuth.js               # admin guard: open in development, disabled in production
+│   ├── adminAuth.js               # admin guard: bearer ADMIN_API_KEY required, closed if unset
 │   ├── rateLimiter.js             # in-memory per-IP rate limiter (booking endpoint)
 │   ├── validate.js                # runs validators on body/query/params -> req.validated
 │   ├── notFound.js                # standard JSON 404 for unknown routes

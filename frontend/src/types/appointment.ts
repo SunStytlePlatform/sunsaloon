@@ -7,6 +7,7 @@ export interface CreateAppointmentPayload {
   appointment_date: string; // YYYY-MM-DD
   appointment_time: string; // HH:mm (24h)
   notes?: string;
+  website?: string; // honeypot, only ever set by bots
 }
 
 export interface FieldError {

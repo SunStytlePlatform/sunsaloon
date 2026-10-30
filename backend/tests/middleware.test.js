@@ -13,17 +13,22 @@ const run = (middleware, req = {}) => {
   return nextArg;
 };
 
-test('adminAuth bypasses in development and blocks in production', (t) => {
-  const original = env.isProduction;
-  t.after(() => { env.isProduction = original; });
+test('adminAuth requires the bearer key and stays closed without one', (t) => {
+  const original = env.adminApiKey;
+  t.after(() => { env.adminApiKey = original; });
+  const key = 'k'.repeat(32);
+  const withHeader = (authorization) => ({ get: (name) => (name.toLowerCase() === 'authorization' ? authorization : undefined) });
 
-  env.isProduction = false;
-  assert.equal(run(adminAuth), undefined);
+  env.adminApiKey = '';
+  const disabled = run(adminAuth, withHeader(`Bearer ${key}`));
+  assert.equal(disabled.status, 403);
+  assert.equal(disabled.code, 'ADMIN_ACCESS_DISABLED');
 
-  env.isProduction = true;
-  const err = run(adminAuth);
-  assert.equal(err.status, 403);
-  assert.equal(err.code, 'ADMIN_ACCESS_DISABLED');
+  env.adminApiKey = key;
+  assert.equal(run(adminAuth, withHeader(undefined)).status, 401);
+  assert.equal(run(adminAuth, withHeader('Bearer nope')).status, 401);
+  assert.equal(run(adminAuth, withHeader(`Basic ${key}`)).status, 401);
+  assert.equal(run(adminAuth, withHeader(`Bearer ${key}`)), undefined);
 });
 
 test('rate limiter allows max requests per window then returns 429', () => {

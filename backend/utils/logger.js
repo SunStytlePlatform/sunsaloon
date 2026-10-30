@@ -1,3 +1,5 @@
+import { redactText, redactValue } from './redact.js';
+
 // Levels from least to most verbose. LOG_LEVEL=null|none|off|silent disables all logs.
 const LEVELS = { error: 0, warn: 1, info: 2, http: 3, debug: 4 };
 const SILENT_VALUES = ['null', 'none', 'off', 'silent'];
@@ -30,10 +32,10 @@ const threshold = isSilent ? -1 : LEVELS[levelName];
 
 function write(level, message, meta, color = LEVEL_COLORS[level]) {
   if (LEVELS[level] > threshold) return;
-  const line = `${color}[${new Date().toISOString()}] ${level.toUpperCase().padEnd(5)} ${message}${COLORS.reset}`;
+  const line = `${color}[${new Date().toISOString()}] ${level.toUpperCase().padEnd(5)} ${redactText(message)}${COLORS.reset}`;
   const out = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
   if (meta === undefined) out(line);
-  else out(line, meta);
+  else out(line, redactValue(meta));
 }
 
 export const logger = {

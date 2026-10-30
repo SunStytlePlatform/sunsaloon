@@ -9,7 +9,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS_RE = /[\u0000-\u001F\u007F]/g;
 
-const LIMITS = { name: 150, phone: 20, email: 255, notes: 500 };
+const LIMITS = { nameMin: 2, name: 150, phone: 20, email: 255, notes: 500 };
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -56,7 +56,9 @@ export function validateCreateAppointmentInput(body) {
 
   if (required('customer_name')) {
     const name = cleanText(body.customer_name);
-    if (name.length > LIMITS.name) errors.push({ field: 'customer_name', message: `customer_name must be at most ${LIMITS.name} characters` });
+    // Length is checked after stripping control characters, so a name made only of them is rejected.
+    if (name.length < LIMITS.nameMin) errors.push({ field: 'customer_name', message: `customer_name must be at least ${LIMITS.nameMin} characters` });
+    else if (name.length > LIMITS.name) errors.push({ field: 'customer_name', message: `customer_name must be at most ${LIMITS.name} characters` });
     else value.customer_name = name;
   }
 

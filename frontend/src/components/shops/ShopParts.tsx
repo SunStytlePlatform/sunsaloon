@@ -1,13 +1,9 @@
 import { Mail, MapPin, Phone } from 'lucide-react';
 import type { Shop } from '@/types/shop';
+import { ShopLogoImage } from './ShopLogoImage';
 
 export function ShopLogo({ shop, className = 'h-20 w-20' }: { shop: Shop; className?: string }) {
-  if (shop.logoUrl) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- logo hosts are not known in advance
-      <img src={shop.logoUrl} alt={`${shop.name} logo`} className={`${className} rounded-2xl object-cover`} loading="lazy" />
-    );
-  }
+  if (shop.logoUrl) return <ShopLogoImage src={shop.logoUrl} name={shop.name} className={className} />;
   return (
     <div
       aria-hidden

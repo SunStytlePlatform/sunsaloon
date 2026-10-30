@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Container } from '@/components/layout/Container';
 import { ShopDetails } from '@/components/shops/ShopDetails';
 import { BookingFlow } from '@/components/booking/BookingFlow';
+import { getBookingRules } from '@/lib/api/bookingRules';
 import { getServicesForShop } from '@/lib/api/services';
 import { loadShop } from './loadShop';
 
@@ -23,11 +24,15 @@ export default async function ShopPage({ params }: Params) {
 
   let services: Awaited<ReturnType<typeof getServicesForShop>> | undefined;
   let servicesFailed = false;
-  try {
-    services = await getServicesForShop(shop.id);
-  } catch {
-    servicesFailed = true;
-  }
+  const [servicesResult, rules] = await Promise.all([
+    getServicesForShop(shop.id).then(
+      (value) => ({ value }),
+      () => null,
+    ),
+    getBookingRules(),
+  ]);
+  if (servicesResult) services = servicesResult.value;
+  else servicesFailed = true;
 
   return (
     <Container className="space-y-8 py-10">
@@ -35,7 +40,7 @@ export default async function ShopPage({ params }: Params) {
         <ArrowLeft className="h-4 w-4" /> All shops
       </Link>
       <ShopDetails shop={shop} />
-      <BookingFlow services={services} servicesFailed={servicesFailed} />
+      <BookingFlow services={services} servicesFailed={servicesFailed} rules={rules} />
     </Container>
   );
 }

@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { isValidTimeString } from '../utils/dateTime.js';
 
 const DEFAULT_PORT = 5000;
 
@@ -51,11 +52,40 @@ function parsePositiveInt(raw, fallback, name) {
   return fallback;
 }
 
+function parseClockTime(raw, fallback, name) {
+  const value = (raw ?? '').trim();
+  if (!value) return fallback;
+  if (isValidTimeString(value) && value.length === 5) return value;
+  logger.warn(`${name} "${raw}" is not a valid HH:MM time - using ${fallback}`);
+  return fallback;
+}
+
+let openingTime = parseClockTime(process.env.SALON_OPENING_TIME, '09:00', 'SALON_OPENING_TIME');
+let closingTime = parseClockTime(process.env.SALON_CLOSING_TIME, '21:00', 'SALON_CLOSING_TIME');
+if (closingTime <= openingTime) {
+  logger.error('SALON_CLOSING_TIME must be after SALON_OPENING_TIME - using 09:00-21:00');
+  openingTime = '09:00';
+  closingTime = '21:00';
+}
+
+const MIN_ADMIN_KEY_LENGTH = 24;
+
+// A short key is guessable, so it is treated as "not configured" and admin endpoints stay closed.
+function parseAdminApiKey(raw) {
+  const key = (raw ?? '').trim();
+  if (!key) return '';
+  if (key.length >= MIN_ADMIN_KEY_LENGTH) return key;
+  logger.error(`ADMIN_API_KEY must be at least ${MIN_ADMIN_KEY_LENGTH} characters - ignoring it, admin endpoints stay disabled`);
+  return '';
+}
+
 const appEnv = parseAppEnv(process.env.APP_ENV);
 
 export const env = {
   appEnv,
   isProduction: appEnv === 'production',
+  // Bearer token required by admin endpoints (generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))").
+  adminApiKey: parseAdminApiKey(process.env.ADMIN_API_KEY),
   // Render injects PORT; fall back to BACKEND_PORT from .env locally.
   port: parsePort(process.env.PORT || process.env.BACKEND_PORT),
   customMessage: process.env.CUSTOM_MESSAGE ?? '(CUSTOM_MESSAGE not set - .env not loaded)',
@@ -71,6 +101,15 @@ export const env = {
     max: parsePositiveInt(process.env.BOOKING_RATE_LIMIT_MAX, 10, 'BOOKING_RATE_LIMIT_MAX'),
     windowMs: parsePositiveInt(process.env.BOOKING_RATE_LIMIT_WINDOW_MINUTES, 15, 'BOOKING_RATE_LIMIT_WINDOW_MINUTES') * 60_000,
   },
+  // Which slots customers may request (all times are in SALON_TIMEZONE). The last slot must start before closing.
+  bookingRules: {
+    openingTime,
+    closingTime,
+    slotIntervalMinutes: parsePositiveInt(process.env.BOOKING_SLOT_MINUTES, 30, 'BOOKING_SLOT_MINUTES'),
+    maxAdvanceDays: parsePositiveInt(process.env.BOOKING_MAX_ADVANCE_DAYS, 90, 'BOOKING_MAX_ADVANCE_DAYS'),
+  },
+  // Pending + confirmed appointments one phone number may hold at once.
+  maxActiveBookingsPerPhone: parsePositiveInt(process.env.MAX_ACTIVE_BOOKINGS_PER_PHONE, 3, 'MAX_ACTIVE_BOOKINGS_PER_PHONE'),
   // Number of reverse proxies in front of the app (Render = 1) so req.ip is the real client IP.
   trustProxy: parsePositiveInt(process.env.TRUST_PROXY, process.env.RENDER ? 1 : 0, 'TRUST_PROXY') || false,
 };

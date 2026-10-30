@@ -21,10 +21,18 @@ logger.debug('Configuration loaded', {
   trustProxy: env.trustProxy,
 });
 
-if (env.isProduction) {
-  logger.info('APP_ENV=production - admin endpoints are DISABLED until admin authentication is implemented');
+if (env.isProduction && ['debug', 'http'].includes(logger.level)) {
+  logger.warn(`LOG_LEVEL=${logger.level} in production is very verbose - use "info" or "warn" (emails and phone numbers are masked in logs, but request details are still written)`);
+}
+
+if (env.isProduction && !env.trustProxy) {
+  logger.warn('TRUST_PROXY is not set - if this server sits behind a reverse proxy/load balancer, every visitor shares one rate-limit bucket (set TRUST_PROXY=<number of proxies>)');
+}
+
+if (env.adminApiKey) {
+  logger.info('Admin endpoints are enabled and require the ADMIN_API_KEY bearer token');
 } else {
-  logger.warn('APP_ENV=development - admin endpoints are UNPROTECTED; do not expose this server publicly');
+  logger.warn('ADMIN_API_KEY is not set - admin endpoints are DISABLED (403)');
 }
 
 try {
