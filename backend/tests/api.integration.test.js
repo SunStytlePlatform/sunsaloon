@@ -1,6 +1,6 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFakeSupabase, SERVICE_ID } from './helpers/fakeSupabase.js';
+import { startFakeSupabase, SERVICE_ID, OPTIONAL_TABLES } from './helpers/fakeSupabase.js';
 import { getNowInTimeZone } from '../utils/dateTime.js';
 
 const ADMIN_KEY = 'test-admin-key-0123456789abcdef';
@@ -260,6 +260,81 @@ test('API responses are never cacheable', async () => {
   assert.equal((await call('/api/shops')).headers.get('cache-control'), 'no-store');
   assert.equal((await call('/api/appointments', { headers: admin })).headers.get('cache-control'), 'no-store');
   assert.equal((await call('/suns/health')).headers.get('cache-control'), 'no-store');
+});
+
+const activeCount = () => fake.tables().appointments.filter((a) => ['pending', 'confirmed'].includes(a.status)).length;
+
+test('a race loser is closed as rejected and never deleted', async () => {
+  const results = await Promise.all(
+    Array.from({ length: 6 }, (_, i) => book({ customer_name: `Racer${i}`, customer_phone: `93000000${String(i).padStart(2, '0')}` })),
+  );
+  assert.equal(results.filter((r) => r.status === 201).length, 1);
+  assert.equal(activeCount(), 1, 'exactly one active appointment holds the slot');
+  assert.equal(fake.tables().appointment_slot_locks.length, 1);
+  const rejected = fake.tables().appointments.filter((a) => a.status === 'rejected');
+  assert.ok(rejected.length >= 1, 'losing requests stay in the table as rejected, not deleted');
+});
+
+test('a stale slot lock (appointment changed outside the API) does not block the slot', async () => {
+  const first = (await book()).json.data;
+  // Someone sets the appointment to rejected directly in the database: the lock row is left behind.
+  fake.tables().appointments.find((a) => a.id === first.id).status = 'rejected';
+  assert.equal(fake.tables().appointment_slot_locks.length, 1);
+  const again = await book({ customer_phone: '9000000002' });
+  assert.equal(again.status, 201);
+  assert.equal(fake.tables().appointment_slot_locks.length, 1);
+  assert.equal(fake.tables().appointment_slot_locks[0].appointment_id, again.json.data.id);
+});
+
+test('an existing active appointment without a lock row still blocks its slot (pre-migration data)', async () => {
+  const first = (await book()).json.data;
+  fake.tables().appointment_slot_locks.length = 0; // as if it was booked before migration 002 existed
+  const second = await book({ customer_phone: '9000000002' });
+  assert.equal(second.status, 409);
+  assert.equal(second.json.error.code, 'SLOT_TAKEN');
+  assert.equal(activeCount(), 1);
+  assert.ok(first.id);
+});
+
+test('releasing happens through the API: confirming keeps the lock, completing frees it', async () => {
+  const first = (await book()).json.data;
+  await call(`/api/appointments/${first.id}/status`, { method: 'PATCH', headers: admin, body: { status: 'confirmed' } });
+  assert.equal(fake.tables().appointment_slot_locks.length, 1);
+  await call(`/api/appointments/${first.id}/status`, { method: 'PATCH', headers: admin, body: { status: 'completed' } });
+  assert.equal(fake.tables().appointment_slot_locks.length, 0);
+});
+
+test('everything keeps working when the optional migrations have not been applied', async () => {
+  fake.withoutTables(...OPTIONAL_TABLES);
+
+  const first = await book();
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  // Slot protection falls back to checking the appointments table.
+  const clash = await book({ customer_phone: '9000000002' });
+  assert.equal(clash.status, 409);
+  assert.equal(clash.json.error.code, 'SLOT_TAKEN');
+
+  const list = await call('/api/appointments', { headers: admin });
+  assert.equal(list.status, 200);
+  assert.equal(list.json.data.length, 1);
+  assert.equal(list.json.data[0].customer.name, 'Alice', 'falls back to the customer record');
+
+  const one = await call(`/api/appointments/${first.json.data.id}`, { headers: admin });
+  assert.equal(one.status, 200);
+  const updated = await call(`/api/appointments/${first.json.data.id}/status`, { method: 'PATCH', headers: admin, body: { status: 'rejected' } });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.json.data.status, 'rejected');
+});
+
+test('the backend never writes to existing tables beyond new rows and status changes', async () => {
+  await book();
+  const [appointment] = fake.tables().appointments;
+  // No new columns are written onto appointments (they would require an ALTER TABLE).
+  assert.deepEqual(
+    Object.keys(appointment).sort(),
+    ['appointment_date', 'appointment_time', 'created_at', 'customer_id', 'id', 'notes', 'service_id', 'status'],
+  );
+  assert.equal(fake.tables().appointment_contacts.length, 1);
 });
 
 test('bot traffic cannot use up the idempotency store and lock real visitors out', async () => {

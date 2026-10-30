@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 
 export const SERVICE_ID = '3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f';
 export const INACTIVE_SERVICE_ID = '4f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f';
-const ACTIVE_STATUSES = ['pending', 'confirmed'];
+
+// The two tables added by supabase/migrations 001 and 002. Tests can "un-apply" them to check the backend still works.
+export const OPTIONAL_TABLES = ['appointment_contacts', 'appointment_slot_locks'];
 
 const seed = () => ({
   shop_settings: [{ id: '5b0c8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f', shop_name: 'Sun Saloon', phone: '9876543210', address: '1 Main St', email: 'hi@example.com', description: 'desc', logo_url: null }],
@@ -13,23 +15,35 @@ const seed = () => ({
   ],
   customers: [],
   appointments: [],
+  appointment_contacts: [],
+  appointment_slot_locks: [],
 });
 
-// Minimal PostgREST emulator (eq / in filters, order, limit, single-object responses, embeds) plus the two
-// database rules the backend relies on: unique customer phone and one active appointment per date + time.
+// Minimal PostgREST emulator (eq / in / gte filters, order, limit, single-object responses, embeds, delete) plus the
+// database rules the backend relies on: unique customer phone, and one slot lock per date + time.
 export async function startFakeSupabase() {
   let db = seed();
+  let missing = new Set();
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://fake');
     const send = (code, body) => {
       res.writeHead(code, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(body));
+      res.end(body === undefined ? undefined : JSON.stringify(body));
     };
     if (url.pathname === '/auth/v1/health') return send(200, { ok: true });
 
     const table = /^\/rest\/v1\/(\w+)$/.exec(url.pathname)?.[1];
     if (!table || !db[table]) return send(404, { code: '42P01', message: 'unknown table' });
+    if (missing.has(table)) {
+      return send(404, { code: 'PGRST205', message: `Could not find the table 'public.${table}' in the schema cache` });
+    }
+    const select = url.searchParams.get('select') ?? '';
+    for (const name of missing) {
+      if (select.includes(name)) {
+        return send(400, { code: 'PGRST200', message: `Could not find a relationship between '${table}' and '${name}' in the schema cache` });
+      }
+    }
 
     let raw = '';
     req.on('data', (chunk) => (raw += chunk));
@@ -44,15 +58,16 @@ export async function startFakeSupabase() {
         if (table !== 'appointments') return row;
         const customer = db.customers.find((c) => c.id === row.customer_id);
         const service = db.services.find((s) => s.id === row.service_id);
+        const contact = db.appointment_contacts.find((c) => c.appointment_id === row.id);
         return {
           ...row,
           customer: customer && { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email },
           service: service && { id: service.id, name: service.name, price: service.price, duration_minutes: service.duration_minutes },
+          contact: contact ? { contact_name: contact.contact_name, contact_phone: contact.contact_phone, contact_email: contact.contact_email } : null,
         };
       };
       // Honour ?select=a,b,alias:table(...) like PostgREST does: only the listed columns (and embeds) come back.
       const project = (row) => {
-        const select = url.searchParams.get('select');
         if (!select || select === '*') return row;
         const parts = select.replace(/\([^)]*\)/g, '').split(',').map((p) => p.trim()).filter(Boolean);
         const keep = new Set(parts.map((p) => p.split(':')[0].trim()));
@@ -62,13 +77,15 @@ export async function startFakeSupabase() {
         for (const [column, value] of url.searchParams) {
           const eq = /^eq\.(.*)$/.exec(value);
           const inList = /^in\.\((.*)\)$/.exec(value);
-          if (eq) rows = rows.filter((r) => String(r[column]).slice(0, eq[1].length) === eq[1]);
           const gte = /^gte\.(.*)$/.exec(value);
+          if (eq) rows = rows.filter((r) => String(r[column]).slice(0, eq[1].length) === eq[1]);
           if (inList) rows = rows.filter((r) => inList[1].split(',').includes(String(r[column])));
           if (gte) rows = rows.filter((r) => String(r[column]) >= gte[1]);
         }
         return rows;
       };
+      const sameTime = (a, b) => String(a).slice(0, 5) === String(b).slice(0, 5);
+      const duplicate = (name) => send(409, { code: '23505', message: `duplicate key value violates unique constraint "${name}"` });
 
       if (req.method === 'GET') {
         let rows = matches(db[table]);
@@ -82,17 +99,19 @@ export async function startFakeSupabase() {
 
       if (req.method === 'POST') {
         const row = JSON.parse(raw);
-        if (table === 'customers' && db.customers.some((c) => c.phone === row.phone)) {
-          return send(409, { code: '23505', message: 'duplicate key value violates unique constraint' });
-        }
+        if (table === 'customers' && db.customers.some((c) => c.phone === row.phone)) return duplicate('customers_phone_key');
         if (table === 'appointments') {
           if (!db.customers.some((c) => c.id === row.customer_id)) return send(409, { code: '23503', message: 'foreign key violation' });
-          const clash = db.appointments.some(
-            (a) => ACTIVE_STATUSES.includes(a.status) && ACTIVE_STATUSES.includes(row.status)
-              && a.appointment_date === row.appointment_date && a.appointment_time.slice(0, 5) === row.appointment_time.slice(0, 5),
-          );
-          if (clash) return send(409, { code: '23505', message: 'duplicate key value violates unique constraint "appointments_unique_active_slot"' });
+          // The real table has no slot rule of its own: that lives in appointment_slot_locks.
           row.appointment_time = `${row.appointment_time}:00`;
+        }
+        if (table === 'appointment_contacts' || table === 'appointment_slot_locks') {
+          if (!db.appointments.some((a) => a.id === row.appointment_id)) return send(409, { code: '23503', message: 'foreign key violation' });
+          if (db[table].some((r) => r.appointment_id === row.appointment_id)) return duplicate(`${table}_pkey`);
+        }
+        if (table === 'appointment_slot_locks'
+          && db.appointment_slot_locks.some((l) => l.appointment_date === row.appointment_date && sameTime(l.appointment_time, row.appointment_time))) {
+          return duplicate('appointment_slot_locks_unique_slot');
         }
         const record = { id: randomUUID(), created_at: new Date().toISOString(), ...row };
         db[table].push(record);
@@ -106,6 +125,12 @@ export async function startFakeSupabase() {
         return reply(rows.map(embed).map(project));
       }
 
+      if (req.method === 'DELETE') {
+        const doomed = new Set(matches(db[table]));
+        db[table] = db[table].filter((r) => !doomed.has(r));
+        return send(204);
+      }
+
       send(405, {});
     });
   });
@@ -113,8 +138,10 @@ export async function startFakeSupabase() {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   return {
     url: `http://127.0.0.1:${server.address().port}`,
-    reset: () => { db = seed(); },
+    reset: () => { db = seed(); missing = new Set(); },
     tables: () => db,
+    // Simulates a database where the optional migrations have not been applied.
+    withoutTables: (...names) => { missing = new Set(names); },
     close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); }),
   };
 }

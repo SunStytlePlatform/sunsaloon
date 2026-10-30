@@ -105,7 +105,7 @@ Request:
 - Optional header `Idempotency-Key: <8-64 chars [A-Za-z0-9_-]>`. Resending the same key with the same body returns the first successful response (header `Idempotent-Replay: true`) instead of booking again; the same key with a different body → `422 IDEMPOTENCY_KEY_REUSED`. Keys are remembered for 10 minutes.
 - The web form includes a hidden `website` field (honeypot). A request with it filled in gets a normal-looking `201` with `data: null` and nothing is stored. Never send it from a real client.
 - The per-IP rate limit only counts well-formed requests, so fixing a typo does not use up the quota.
-- An existing customer with the same phone is reused, but the name/email typed on this booking are stored on the appointment itself (`contact_*` columns) and shown to admins.
+- An existing customer with the same phone is reused, but the name/email typed on this booking are stored in a separate `appointment_contacts` table (one row per appointment) and shown to admins instead of the customer record. Appointments made before that table existed show the customer record.
 - A date + time already held by a `pending` or `confirmed` appointment → `409 SLOT_TAKEN`. Rejected, cancelled and completed appointments free the slot.
 - `status` is always `pending`; any `status`, `shop_id`, `customer_id` sent by the client is ignored.
 

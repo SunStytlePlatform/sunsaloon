@@ -20,7 +20,7 @@ note. This is safe today because nothing renders it as HTML:
 ## Secrets and access
 
 - `SUPABASE_SERVICE_ROLE_KEY` and `ADMIN_API_KEY` live only in the backend environment; never prefix them with `NEXT_PUBLIC_`.
-- Row level security is enabled on every table (see `supabase/migrations/000_base_schema.sql`) so the public anon key cannot read customers or appointments.
+- The two new tables (`appointment_contacts`, `appointment_slot_locks`) have row level security enabled. The migrations deliberately do **not** touch your existing tables, so RLS on `customers`, `appointments`, `services` and `shop_settings` is left to you: check in the Supabase dashboard that the public anon key cannot read customers or appointments, and enable RLS there yourself if it can (only after confirming nothing else uses the anon key).
 - Logs mask emails and phone numbers (`backend/utils/redact.js`); still run production at `LOG_LEVEL=info`.
 
 ## Known limits

@@ -18,9 +18,16 @@ Frontend checks: `npm run typecheck --prefix frontend`, `npm run lint --prefix f
 
 ## Database
 
-Apply the SQL in [supabase/migrations](supabase/migrations) in order **before** deploying a backend version that needs it:
-`000` base tables + row level security (reconstructed from the code - compare it with your live project first),
-`001` one active appointment per slot, `002` per-booking contact details.
+The SQL in [supabase/migrations](supabase/migrations) is **additive only**: each file creates one new table and nothing
+else. No existing table, column, index, constraint or row is altered, updated, deleted, truncated or dropped, so running
+them cannot lose or change existing data (a test, `backend/tests/migrations.test.js`, enforces this).
+
+- `001_appointment_contacts.sql`: new table keeping the name/phone/email typed on each booking.
+- `002_appointment_slot_locks.sql`: new table that lets the database decide two simultaneous bookings for one slot.
+
+Both are optional: if a table is missing the backend logs a warning and keeps working (without that feature), so the
+code can be deployed before or after the SQL is applied. Run them in the Supabase SQL editor, in order.
+Security notes for stored customer text: [docs/SECURITY.md](docs/SECURITY.md).
 Security notes for stored customer text: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Deploying (production checklist)

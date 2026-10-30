@@ -11,23 +11,39 @@ import { findOrCreateCustomer } from './customer.service.js';
 
 // customer_id is internal and never returned to the public booking client.
 const CREATED_COLUMNS = 'id, service_id, appointment_date, appointment_time, status, notes, created_at';
-const DETAIL_COLUMNS = `
+const BASE_DETAIL_COLUMNS = `
   id, appointment_date, appointment_time, status, notes, created_at,
-  contact_name, contact_phone, contact_email,
   customer:customers ( id, name, phone, email ),
   service:services ( id, name, price, duration_minutes )
 `;
+// appointment_contacts is a separate table (supabase/migrations/001) so no existing table has to change.
+const DETAIL_COLUMNS = `${BASE_DETAIL_COLUMNS}, contact:appointment_contacts ( contact_name, contact_phone, contact_email )`;
+
 // A slot is held by pending and confirmed requests; rejected, cancelled and completed ones free it.
 const SLOT_HOLDING_STATUSES = [APPOINTMENT_STATUS.PENDING, APPOINTMENT_STATUS.CONFIRMED];
 const UNIQUE_VIOLATION = '23505';
+// PostgREST / Postgres codes for "that table or relationship does not exist (yet)": the optional migrations are not applied.
+const MISSING_RELATION_CODES = new Set(['PGRST200', 'PGRST205', '42P01']);
+const isMissingRelation = (error) => MISSING_RELATION_CODES.has(error?.code);
 
 // The contact details typed on this booking win over the shared, phone-keyed customer record.
-function formatAppointment({ contact_name, contact_phone, contact_email, ...row }) {
+function formatAppointment({ contact, ...row }) {
   const formatted = { ...row, appointment_time: toHHMM(row.appointment_time) };
-  if (row.customer && contact_phone) {
-    formatted.customer = { ...row.customer, name: contact_name, phone: contact_phone, email: contact_email };
+  if (row.customer && contact?.contact_phone) {
+    formatted.customer = { ...row.customer, name: contact.contact_name, phone: contact.contact_phone, email: contact.contact_email };
   }
   return formatted;
+}
+
+// Runs a detail query with the contact join; if migration 001 has not been applied, runs it again without the join so
+// the admin endpoints keep working (they then show the customer record, as before).
+async function fetchDetail(buildQuery) {
+  const result = await buildQuery(DETAIL_COLUMNS);
+  if (result.error && isMissingRelation(result.error)) {
+    logger.debug('appointment.service: appointment_contacts is not available - using customer records only');
+    return buildQuery(BASE_DETAIL_COLUMNS);
+  }
+  return result;
 }
 
 const slotTakenError = () =>
@@ -54,6 +70,81 @@ async function countActiveBookings(customerId, today) {
     .gte('appointment_date', today);
   if (error) throw toApiError(error, 'counting active appointments');
   return data.length;
+}
+
+// The race-loser's request is closed as 'rejected' (a normal lifecycle step) rather than deleted, so this service never
+// deletes appointment rows.
+async function abandonAppointment(id) {
+  const { error } = await getSupabase()
+    .from('appointments')
+    .update({ status: APPOINTMENT_STATUS.REJECTED })
+    .eq('id', id)
+    .eq('status', APPOINTMENT_STATUS.PENDING);
+  if (error) logger.error(`appointment.service: could not close losing appointment ${id}: ${error.message}`);
+}
+
+// Reserves the date + time in appointment_slot_locks (supabase/migrations/002). The unique constraint there decides
+// a race between two requests that both passed isSlotTaken(). Without the table the booking still works, just without
+// that last-instant protection.
+async function lockSlot(appointment) {
+  const supabase = getSupabase();
+  const row = {
+    appointment_id: appointment.id,
+    appointment_date: appointment.appointment_date,
+    appointment_time: appointment.appointment_time,
+  };
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { error } = await supabase.from('appointment_slot_locks').insert(row);
+    if (!error) return;
+    if (isMissingRelation(error)) {
+      logger.warn('appointment.service: appointment_slot_locks is not available - apply supabase/migrations/002 to prevent simultaneous double bookings');
+      return;
+    }
+    if (error.code !== UNIQUE_VIOLATION) {
+      await abandonAppointment(appointment.id);
+      throw toApiError(error, 'reserving the appointment slot');
+    }
+
+    // Someone holds this slot. If their appointment is no longer active the lock is stale (status changed outside the
+    // API): release it and try once more. Otherwise this request lost the race.
+    const { data: lock } = await supabase
+      .from('appointment_slot_locks')
+      .select('appointment_id')
+      .eq('appointment_date', row.appointment_date)
+      .eq('appointment_time', row.appointment_time)
+      .maybeSingle();
+    const { data: holder } = lock
+      ? await supabase.from('appointments').select('id, status').eq('id', lock.appointment_id).maybeSingle()
+      : { data: null };
+    if (holder && holder.id !== appointment.id && SLOT_HOLDING_STATUSES.includes(holder.status)) break;
+    if (lock) await supabase.from('appointment_slot_locks').delete().eq('appointment_id', lock.appointment_id);
+  }
+
+  await abandonAppointment(appointment.id);
+  throw slotTakenError();
+}
+
+async function releaseSlot(appointmentId) {
+  const { error } = await getSupabase().from('appointment_slot_locks').delete().eq('appointment_id', appointmentId);
+  // A leftover lock is harmless: lockSlot() ignores locks whose appointment is no longer active.
+  if (error && !isMissingRelation(error)) logger.warn(`appointment.service: could not release slot lock for ${appointmentId}: ${error.message}`);
+}
+
+// Best effort: the booking already exists, so a failure here must not fail the request.
+async function saveContact(appointmentId, input) {
+  const { error } = await getSupabase().from('appointment_contacts').insert({
+    appointment_id: appointmentId,
+    contact_name: input.customer_name,
+    contact_phone: input.customer_phone,
+    contact_email: input.customer_email,
+  });
+  if (!error) return;
+  if (isMissingRelation(error)) {
+    logger.warn('appointment.service: appointment_contacts is not available - apply supabase/migrations/001 to keep per-booking contact details');
+  } else {
+    logger.error(`appointment.service: could not save contact details for appointment ${appointmentId}: ${error.message}`);
+  }
 }
 
 export async function createAppointment(input) {
@@ -96,9 +187,6 @@ export async function createAppointment(input) {
       appointment_date: input.appointment_date,
       appointment_time: input.appointment_time,
       notes: input.notes,
-      contact_name: input.customer_name,
-      contact_phone: input.customer_phone,
-      contact_email: input.customer_email,
       status: APPOINTMENT_STATUS.PENDING,
     })
     .select(CREATED_COLUMNS)
@@ -106,10 +194,11 @@ export async function createAppointment(input) {
 
   if (error) {
     if (created) logger.warn(`appointment.service: customer ${customer.id} was created but the appointment insert failed`);
-    // The partial unique index catches a concurrent booking that slipped past isSlotTaken().
-    if (error.code === UNIQUE_VIOLATION) throw slotTakenError();
     throw toApiError(error, 'creating appointment');
   }
+
+  await lockSlot(data);
+  await saveContact(data.id, input);
 
   logger.info(`appointment.service: created appointment ${data.id} for customer ${customer.id}`);
   return formatAppointment(data);
@@ -117,17 +206,17 @@ export async function createAppointment(input) {
 
 export async function listAppointments({ status, date } = {}) {
   logger.debug('appointment.service: listing appointments', { status, date });
-  let query = getSupabase()
-    .from('appointments')
-    .select(DETAIL_COLUMNS)
-    .order('appointment_date')
-    .order('appointment_time')
-    .order('created_at');
-
-  if (status) query = query.eq('status', status);
-  if (date) query = query.eq('appointment_date', date);
-
-  const { data, error } = await query;
+  const { data, error } = await fetchDetail((columns) => {
+    let query = getSupabase()
+      .from('appointments')
+      .select(columns)
+      .order('appointment_date')
+      .order('appointment_time')
+      .order('created_at');
+    if (status) query = query.eq('status', status);
+    if (date) query = query.eq('appointment_date', date);
+    return query;
+  });
   if (error) throw toApiError(error, 'listing appointments');
   logger.debug(`appointment.service: found ${data.length} appointment(s)`);
   return data.map(formatAppointment);
@@ -135,11 +224,9 @@ export async function listAppointments({ status, date } = {}) {
 
 export async function getAppointmentById(id) {
   logger.debug(`appointment.service: fetching appointment ${id}`);
-  const { data, error } = await getSupabase()
-    .from('appointments')
-    .select(DETAIL_COLUMNS)
-    .eq('id', id)
-    .maybeSingle();
+  const { data, error } = await fetchDetail((columns) =>
+    getSupabase().from('appointments').select(columns).eq('id', id).maybeSingle(),
+  );
 
   if (error) throw toApiError(error, 'fetching appointment');
   if (!data) throw new ApiError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found');
@@ -168,18 +255,22 @@ export async function updateAppointmentStatus(id, nextStatus) {
   }
 
   // Conditional update: only succeeds if nobody changed the status since we read it.
-  const { data, error } = await supabase
-    .from('appointments')
-    .update({ status: nextStatus })
-    .eq('id', id)
-    .eq('status', current.status)
-    .select(DETAIL_COLUMNS)
-    .maybeSingle();
+  const { data, error } = await fetchDetail((columns) =>
+    supabase
+      .from('appointments')
+      .update({ status: nextStatus })
+      .eq('id', id)
+      .eq('status', current.status)
+      .select(columns)
+      .maybeSingle(),
+  );
 
   if (error) throw toApiError(error, 'updating appointment status');
   if (!data) {
     throw new ApiError(409, 'STATUS_CONFLICT', 'The appointment was updated by another request; reload and try again');
   }
+
+  if (!SLOT_HOLDING_STATUSES.includes(nextStatus)) await releaseSlot(id);
 
   logger.info(`appointment.service: appointment ${id} status ${current.status} -> ${nextStatus}`);
   return formatAppointment(data);
