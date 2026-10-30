@@ -18,9 +18,14 @@ Frontend checks: `npm run typecheck --prefix frontend`, `npm run lint --prefix f
 
 ## Database
 
-The SQL in [supabase/migrations](supabase/migrations) is **additive only**: each file creates one new table and nothing
-else. No existing table, column, index, constraint or row is altered, updated, deleted, truncated or dropped, so running
-them cannot lose or change existing data (a test, `backend/tests/migrations.test.js`, enforces this).
+**Merging or deploying this repo never changes your database.** The SQL lives in [database/manual-sql](database/manual-sql),
+a folder that nothing executes (not CI, not a deploy script, not the backend). It is deliberately *not* in
+`supabase/migrations/`, which Supabase's GitHub integration would apply automatically on merge. You run the files by hand,
+when you decide to.
+
+The SQL is also **additive only**: each file creates one new table and nothing else. No existing table, column, index,
+constraint or row is altered, updated, deleted, truncated or dropped, so running them cannot lose or change existing data
+(a test, `backend/tests/migrations.test.js`, enforces this).
 
 - `001_appointment_contacts.sql`: new table keeping the name/phone/email typed on each booking.
 - `002_appointment_slot_locks.sql`: new table that lets the database decide two simultaneous bookings for one slot.

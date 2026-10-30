@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const dir = path.resolve(import.meta.dirname, '../../supabase/migrations');
+const dir = path.resolve(import.meta.dirname, '../../database/manual-sql');
 const files = readdirSync(dir).filter((name) => name.endsWith('.sql')).sort();
 
 // Statements are split on ';' after comments are removed.
@@ -46,3 +46,56 @@ for (const file of files) {
     assert.match(sql, /references appointments \(id\) on delete cascade/);
   });
 }
+
+// ---- Merging must never change the database -------------------------------------------------------------------
+// Supabase's GitHub integration applies everything in supabase/migrations/ on merge, and anything that runs SQL from
+// CI or a deploy script would do the same. None of that may exist.
+const root = path.resolve(import.meta.dirname, '../..');
+
+function sqlFilesOutsideManualFolder(folder = root, found = []) {
+  for (const entry of readdirSync(folder, { withFileTypes: true })) {
+    if (['node_modules', '.git', '.next'].includes(entry.name)) continue;
+    const full = path.join(folder, entry.name);
+    if (entry.isDirectory()) sqlFilesOutsideManualFolder(full, found);
+    else if (entry.name.endsWith('.sql') && path.dirname(full) !== dir) found.push(path.relative(root, full));
+  }
+  return found;
+}
+
+test('no folder or config that Supabase would auto-apply on merge', () => {
+  assert.equal(existsSync(path.join(root, 'supabase', 'migrations')), false, 'supabase/migrations must not exist');
+  assert.equal(existsSync(path.join(root, 'supabase', 'config.toml')), false, 'supabase/config.toml must not exist');
+});
+
+test('SQL files exist only in database/manual-sql', () => {
+  assert.deepEqual(sqlFilesOutsideManualFolder(), []);
+});
+
+test('no CI workflow or npm script runs SQL or migrations', () => {
+  const runsSql = /supabase\s+(db|migration|link)|db\s+push|\bpsql\b|\bmigrat|pg_dump|prisma|knex|flyway|alembic/i;
+  const workflows = path.join(root, '.github', 'workflows');
+  const texts = existsSync(workflows)
+    ? readdirSync(workflows).map((name) => [`.github/workflows/${name}`, readFileSync(path.join(workflows, name), 'utf8')])
+    : [];
+  for (const manifest of ['package.json', 'backend/package.json', 'frontend/package.json']) {
+    const scripts = JSON.parse(readFileSync(path.join(root, manifest), 'utf8')).scripts ?? {};
+    texts.push([`${manifest} scripts`, Object.values(scripts).join('\n')]);
+  }
+  for (const [name, text] of texts) assert.ok(!runsSql.test(text), `${name} runs SQL or migrations`);
+});
+
+test('backend code never executes DDL or raw SQL', () => {
+  const runBackend = (folder, found = []) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      if (['node_modules', 'tests'].includes(entry.name)) continue;
+      const full = path.join(folder, entry.name);
+      if (entry.isDirectory()) runBackend(full, found);
+      else if (entry.name.endsWith('.js')) found.push(full);
+    }
+    return found;
+  };
+  const risky = /\.rpc\(|\bcreate\s+table\b|\balter\s+table\b|\bdrop\s+table\b|\bexec_sql\b/i;
+  for (const file of runBackend(path.resolve(import.meta.dirname, '..'))) {
+    assert.ok(!risky.test(readFileSync(file, 'utf8')), `${path.relative(root, file)} executes SQL`);
+  }
+});

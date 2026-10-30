@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 export const SERVICE_ID = '3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f';
 export const INACTIVE_SERVICE_ID = '4f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f';
 
-// The two tables added by supabase/migrations 001 and 002. Tests can "un-apply" them to check the backend still works.
+// The two tables added by database/manual-sql 001 and 002. Tests can "un-apply" them to check the backend still works.
 export const OPTIONAL_TABLES = ['appointment_contacts', 'appointment_slot_locks'];
 
 const seed = () => ({

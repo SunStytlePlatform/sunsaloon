@@ -16,7 +16,7 @@ const BASE_DETAIL_COLUMNS = `
   customer:customers ( id, name, phone, email ),
   service:services ( id, name, price, duration_minutes )
 `;
-// appointment_contacts is a separate table (supabase/migrations/001) so no existing table has to change.
+// appointment_contacts is a separate table (database/manual-sql/001) so no existing table has to change.
 const DETAIL_COLUMNS = `${BASE_DETAIL_COLUMNS}, contact:appointment_contacts ( contact_name, contact_phone, contact_email )`;
 
 // A slot is held by pending and confirmed requests; rejected, cancelled and completed ones free it.
@@ -83,7 +83,7 @@ async function abandonAppointment(id) {
   if (error) logger.error(`appointment.service: could not close losing appointment ${id}: ${error.message}`);
 }
 
-// Reserves the date + time in appointment_slot_locks (supabase/migrations/002). The unique constraint there decides
+// Reserves the date + time in appointment_slot_locks (database/manual-sql/002). The unique constraint there decides
 // a race between two requests that both passed isSlotTaken(). Without the table the booking still works, just without
 // that last-instant protection.
 async function lockSlot(appointment) {
@@ -98,7 +98,7 @@ async function lockSlot(appointment) {
     const { error } = await supabase.from('appointment_slot_locks').insert(row);
     if (!error) return;
     if (isMissingRelation(error)) {
-      logger.warn('appointment.service: appointment_slot_locks is not available - apply supabase/migrations/002 to prevent simultaneous double bookings');
+      logger.warn('appointment.service: appointment_slot_locks is not available - apply database/manual-sql/002 to prevent simultaneous double bookings');
       return;
     }
     if (error.code !== UNIQUE_VIOLATION) {
@@ -141,7 +141,7 @@ async function saveContact(appointmentId, input) {
   });
   if (!error) return;
   if (isMissingRelation(error)) {
-    logger.warn('appointment.service: appointment_contacts is not available - apply supabase/migrations/001 to keep per-booking contact details');
+    logger.warn('appointment.service: appointment_contacts is not available - apply database/manual-sql/001 to keep per-booking contact details');
   } else {
     logger.error(`appointment.service: could not save contact details for appointment ${appointmentId}: ${error.message}`);
   }
