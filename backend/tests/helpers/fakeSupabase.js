@@ -24,6 +24,7 @@ const seed = () => ({
 export async function startFakeSupabase() {
   let db = seed();
   let missing = new Set();
+  let deletes = 0;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://fake');
@@ -78,6 +79,7 @@ export async function startFakeSupabase() {
           const eq = /^eq\.(.*)$/.exec(value);
           const inList = /^in\.\((.*)\)$/.exec(value);
           const gte = /^gte\.(.*)$/.exec(value);
+          if (value === 'is.null') rows = rows.filter((r) => r[column] === null || r[column] === undefined);
           if (eq) rows = rows.filter((r) => String(r[column]).slice(0, eq[1].length) === eq[1]);
           if (inList) rows = rows.filter((r) => inList[1].split(',').includes(String(r[column])));
           if (gte) rows = rows.filter((r) => String(r[column]) >= gte[1]);
@@ -109,9 +111,10 @@ export async function startFakeSupabase() {
           if (!db.appointments.some((a) => a.id === row.appointment_id)) return send(409, { code: '23503', message: 'foreign key violation' });
           if (db[table].some((r) => r.appointment_id === row.appointment_id)) return duplicate(`${table}_pkey`);
         }
+        // Exclusion constraint: only one ACTIVE (released_at is null) lock per date + time. Postgres code 23P01.
         if (table === 'appointment_slot_locks'
-          && db.appointment_slot_locks.some((l) => l.appointment_date === row.appointment_date && sameTime(l.appointment_time, row.appointment_time))) {
-          return duplicate('appointment_slot_locks_unique_slot');
+          && db.appointment_slot_locks.some((l) => !l.released_at && l.appointment_date === row.appointment_date && sameTime(l.appointment_time, row.appointment_time))) {
+          return send(409, { code: '23P01', message: 'conflicting key value violates exclusion constraint "appointment_slot_locks_one_active_per_slot"' });
         }
         const record = { id: randomUUID(), created_at: new Date().toISOString(), ...row };
         db[table].push(record);
@@ -126,6 +129,7 @@ export async function startFakeSupabase() {
       }
 
       if (req.method === 'DELETE') {
+        deletes += 1; // the backend is not supposed to delete anything; tests assert this stays 0
         const doomed = new Set(matches(db[table]));
         db[table] = db[table].filter((r) => !doomed.has(r));
         return send(204);
@@ -138,8 +142,9 @@ export async function startFakeSupabase() {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   return {
     url: `http://127.0.0.1:${server.address().port}`,
-    reset: () => { db = seed(); missing = new Set(); },
+    reset: () => { db = seed(); missing = new Set(); deletes = 0; },
     tables: () => db,
+    deleteRequests: () => deletes,
     // Simulates a database where the optional migrations have not been applied.
     withoutTables: (...names) => { missing = new Set(names); },
     close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve); }),

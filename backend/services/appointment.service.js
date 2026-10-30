@@ -21,7 +21,8 @@ const DETAIL_COLUMNS = `${BASE_DETAIL_COLUMNS}, contact:appointment_contacts ( c
 
 // A slot is held by pending and confirmed requests; rejected, cancelled and completed ones free it.
 const SLOT_HOLDING_STATUSES = [APPOINTMENT_STATUS.PENDING, APPOINTMENT_STATUS.CONFIRMED];
-const UNIQUE_VIOLATION = '23505';
+// 23505 = unique violation, 23P01 = exclusion violation (what appointment_slot_locks raises for a taken slot).
+const SLOT_CONFLICT_CODES = new Set(['23505', '23P01']);
 // PostgREST / Postgres codes for "that table or relationship does not exist (yet)": the optional migrations are not applied.
 const MISSING_RELATION_CODES = new Set(['PGRST200', 'PGRST205', '42P01']);
 const isMissingRelation = (error) => MISSING_RELATION_CODES.has(error?.code);
@@ -101,33 +102,39 @@ async function lockSlot(appointment) {
       logger.warn('appointment.service: appointment_slot_locks is not available - apply database/manual-sql/002 to prevent simultaneous double bookings');
       return;
     }
-    if (error.code !== UNIQUE_VIOLATION) {
+    if (!SLOT_CONFLICT_CODES.has(error.code)) {
       await abandonAppointment(appointment.id);
       throw toApiError(error, 'reserving the appointment slot');
     }
 
     // Someone holds this slot. If their appointment is no longer active the lock is stale (status changed outside the
-    // API): release it and try once more. Otherwise this request lost the race.
+    // API): mark it released and try once more. Otherwise this request lost the race.
     const { data: lock } = await supabase
       .from('appointment_slot_locks')
       .select('appointment_id')
       .eq('appointment_date', row.appointment_date)
       .eq('appointment_time', row.appointment_time)
+      .is('released_at', null)
       .maybeSingle();
     const { data: holder } = lock
       ? await supabase.from('appointments').select('id, status').eq('id', lock.appointment_id).maybeSingle()
       : { data: null };
     if (holder && holder.id !== appointment.id && SLOT_HOLDING_STATUSES.includes(holder.status)) break;
-    if (lock) await supabase.from('appointment_slot_locks').delete().eq('appointment_id', lock.appointment_id);
+    if (lock) await markReleased(lock.appointment_id);
   }
 
   await abandonAppointment(appointment.id);
   throw slotTakenError();
 }
 
-async function releaseSlot(appointmentId) {
-  const { error } = await getSupabase().from('appointment_slot_locks').delete().eq('appointment_id', appointmentId);
-  // A leftover lock is harmless: lockSlot() ignores locks whose appointment is no longer active.
+// Frees the slot by stamping the lock row, never by deleting it (nothing is deleted anywhere by this backend).
+async function markReleased(appointmentId) {
+  const { error } = await getSupabase()
+    .from('appointment_slot_locks')
+    .update({ released_at: new Date().toISOString() })
+    .eq('appointment_id', appointmentId)
+    .is('released_at', null);
+  // A leftover active lock is harmless: lockSlot() ignores locks whose appointment is no longer active.
   if (error && !isMissingRelation(error)) logger.warn(`appointment.service: could not release slot lock for ${appointmentId}: ${error.message}`);
 }
 
@@ -270,7 +277,7 @@ export async function updateAppointmentStatus(id, nextStatus) {
     throw new ApiError(409, 'STATUS_CONFLICT', 'The appointment was updated by another request; reload and try again');
   }
 
-  if (!SLOT_HOLDING_STATUSES.includes(nextStatus)) await releaseSlot(id);
+  if (!SLOT_HOLDING_STATUSES.includes(nextStatus)) await markReleased(id);
 
   logger.info(`appointment.service: appointment ${id} status ${current.status} -> ${nextStatus}`);
   return formatAppointment(data);

@@ -31,8 +31,10 @@ constraint or row is altered, updated, deleted, truncated or dropped, so running
 - `002_appointment_slot_locks.sql`: new table that lets the database decide two simultaneous bookings for one slot.
 
 Both are optional: if a table is missing the backend logs a warning and keeps working (without that feature), so the
-code can be deployed before or after the SQL is applied. Run them in the Supabase SQL editor, in order.
-Security notes for stored customer text: [docs/SECURITY.md](docs/SECURITY.md).
+code can be deployed before or after the SQL is applied.
+
+**To apply them, follow the step-by-step [runbook](database/manual-sql/RUNBOOK.md)**: a pre-check, each file, a check after
+each, and a final check that proves your existing tables are unchanged. All check queries are read-only.
 Security notes for stored customer text: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Deploying (production checklist)

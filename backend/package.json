@@ -27,5 +27,8 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "helmet": "^8.3.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.13"
   }
 }

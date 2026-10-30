@@ -3,20 +3,28 @@
 -- It is also safe to run on a database that already contains duplicate or overlapping appointments (nothing is
 -- validated against existing rows). Safe to run more than once (`if not exists`).
 --
--- Why: two customers sending the same date + time at the same instant must not both get it. The backend inserts a
--- row here for every new pending/confirmed appointment; the unique constraint lets the database decide a race.
--- The backend removes the row when the appointment is rejected, cancelled or completed, and it ignores a stale row
--- whose appointment is no longer active. Existing appointments are still checked through the appointments table.
+-- Why: two customers sending the same date + time at the same instant must not both get it. The backend adds a row
+-- here for every new pending/confirmed appointment; the exclusion constraint below lets the database decide a race
+-- (it allows only ONE active row per date + time, exactly like a unique rule).
+-- Rows are never deleted by the backend: when an appointment is rejected, cancelled or completed its row is only
+-- marked with `released_at`, which frees the slot. Existing appointments are still checked through the appointments
+-- table, so bookings made before this table existed keep blocking their slots.
 --
--- Depends on: appointments(id) being the primary key.
+-- Depends on: appointments(id) being a uuid primary key (the pre-check in checks/00_pre_check.sql verifies this).
 
 create table if not exists appointment_slot_locks (
-  -- on delete cascade: deleting an appointment frees its slot and is never blocked by this table.
+  -- on delete cascade: deleting an appointment (e.g. from the Supabase dashboard) is never blocked by this table;
+  -- only this table's own row for that appointment goes with it.
   appointment_id   uuid primary key references appointments (id) on delete cascade,
   appointment_date date not null,
   appointment_time time not null,
+  released_at      timestamptz,
   created_at       timestamptz not null default now(),
-  constraint appointment_slot_locks_unique_slot unique (appointment_date, appointment_time)
+  -- One ACTIVE (not released) row per date + time. A released row no longer counts.
+  constraint appointment_slot_locks_one_active_per_slot
+    exclude using btree (appointment_date with =, appointment_time with =) where (released_at is null)
 );
 
+-- Only the backend (service-role key, which bypasses RLS) uses this table. Enabling RLS with no policies on this NEW
+-- table keeps the public anon key from reading it.
 alter table appointment_slot_locks enable row level security;

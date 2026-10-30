@@ -57,7 +57,7 @@ function sqlFilesOutsideManualFolder(folder = root, found = []) {
     if (['node_modules', '.git', '.next'].includes(entry.name)) continue;
     const full = path.join(folder, entry.name);
     if (entry.isDirectory()) sqlFilesOutsideManualFolder(full, found);
-    else if (entry.name.endsWith('.sql') && path.dirname(full) !== dir) found.push(path.relative(root, full));
+    else if (entry.name.endsWith('.sql') && !full.startsWith(dir + path.sep)) found.push(path.relative(root, full));
   }
   return found;
 }
@@ -65,6 +65,22 @@ function sqlFilesOutsideManualFolder(folder = root, found = []) {
 test('no folder or config that Supabase would auto-apply on merge', () => {
   assert.equal(existsSync(path.join(root, 'supabase', 'migrations')), false, 'supabase/migrations must not exist');
   assert.equal(existsSync(path.join(root, 'supabase', 'config.toml')), false, 'supabase/config.toml must not exist');
+});
+
+test('the check files in database/manual-sql/checks are read-only (a single SELECT each)', () => {
+  const checksDir = path.join(dir, 'checks');
+  const checkFiles = readdirSync(checksDir).filter((name) => name.endsWith('.sql')).sort();
+  assert.deepEqual(checkFiles, ['00_pre_check.sql', '01_after_001.sql', '02_after_002.sql', '99_final_check.sql']);
+  for (const file of checkFiles) {
+    const parsed = statements(readFileSync(path.join(checksDir, file), 'utf8'));
+    assert.equal(parsed.length, 1, `${file} must be exactly one statement (the Supabase editor only shows the last result)`);
+    assert.match(parsed[0], /^(with|select)\b/, `${file} must start with with/select`);
+    // Text inside quotes is only a label (e.g. 'ON DELETE CASCADE'), so look at the SQL outside string literals.
+    const code = parsed[0].replace(/'(?:[^']|'')*'/g, "''");
+    for (const banned of [/\bdrop\b/, /\btruncate\b/, /\bdelete\b/, /\binsert\b/, /\bupdate\b/, /\balter\b/, /\bcreate\b/, /\bgrant\b/, /\brevoke\b/, /\bcomment on\b/, /\bcopy\b/, /\bdo \$/]) {
+      assert.ok(!banned.test(code), `${file} contains ${banned}`);
+    }
+  }
 });
 
 test('SQL files exist only in database/manual-sql', () => {

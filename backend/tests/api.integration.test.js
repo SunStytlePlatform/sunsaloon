@@ -282,8 +282,13 @@ test('a stale slot lock (appointment changed outside the API) does not block the
   assert.equal(fake.tables().appointment_slot_locks.length, 1);
   const again = await book({ customer_phone: '9000000002' });
   assert.equal(again.status, 201);
-  assert.equal(fake.tables().appointment_slot_locks.length, 1);
-  assert.equal(fake.tables().appointment_slot_locks[0].appointment_id, again.json.data.id);
+  const locks = fake.tables().appointment_slot_locks;
+  assert.equal(locks.length, 2, 'the stale lock is kept, only marked as released');
+  assert.ok(locks.find((l) => l.appointment_id === first.id).released_at, 'stale lock was stamped released');
+  const active = locks.filter((l) => !l.released_at);
+  assert.equal(active.length, 1);
+  assert.equal(active[0].appointment_id, again.json.data.id);
+  assert.equal(fake.deleteRequests(), 0);
 });
 
 test('an existing active appointment without a lock row still blocks its slot (pre-migration data)', async () => {
@@ -296,12 +301,25 @@ test('an existing active appointment without a lock row still blocks its slot (p
   assert.ok(first.id);
 });
 
-test('releasing happens through the API: confirming keeps the lock, completing frees it', async () => {
+test('releasing happens through the API: confirming keeps the lock, completing frees it without deleting', async () => {
   const first = (await book()).json.data;
   await call(`/api/appointments/${first.id}/status`, { method: 'PATCH', headers: admin, body: { status: 'confirmed' } });
-  assert.equal(fake.tables().appointment_slot_locks.length, 1);
+  const activeLocks = () => fake.tables().appointment_slot_locks.filter((l) => !l.released_at).length;
+  assert.equal(activeLocks(), 1);
   await call(`/api/appointments/${first.id}/status`, { method: 'PATCH', headers: admin, body: { status: 'completed' } });
-  assert.equal(fake.tables().appointment_slot_locks.length, 0);
+  assert.equal(activeLocks(), 0, 'slot is free again');
+  assert.equal(fake.tables().appointment_slot_locks.length, 1, 'the lock row is kept, only stamped with released_at');
+  assert.equal((await book({ customer_phone: '9000000002' })).status, 201, 'and the slot can be booked again');
+});
+
+test('the backend never sends a DELETE request to the database', async () => {
+  const a = (await book()).json.data;
+  await book({ customer_phone: '9000000002' }); // slot taken
+  await Promise.all(Array.from({ length: 4 }, (_, i) => book({ appointment_time: '12:00', customer_phone: `94000000${i}0` }))); // race
+  await call(`/api/appointments/${a.id}/status`, { method: 'PATCH', headers: admin, body: { status: 'rejected' } });
+  fake.tables().appointments.find((x) => x.status === 'pending').status = 'cancelled'; // stale lock path
+  await book({ appointment_time: '12:00', customer_phone: '9400000099' });
+  assert.equal(fake.deleteRequests(), 0);
 });
 
 test('everything keeps working when the optional migrations have not been applied', async () => {
